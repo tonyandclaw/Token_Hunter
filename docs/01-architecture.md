@@ -40,9 +40,13 @@ ClaudeAgentOptions(
     permission_mode="default",  # 走我們自己的 hooks
     allowed_tools=[...],
     hooks={"PreToolUse": [permission_gate], "PostToolUse": [audit_log]},
-    system_prompt=open("CLAUDE.md").read(),
+    system_prompt=open("docs/00-agent-identity.md").read().format(
+        USER_NAME=os.environ["USER_NAME"],
+    ),
 )
 ```
+
+Runtime constitution 來源是 `docs/00-agent-identity.md`,**不是** repo 根目錄的 `CLAUDE.md`(後者只給 Claude Code dev tool 用)。決議見 docs/00 開頭「Role split」段。
 
 ### Layer 4 — Tools (MCP & Native)
 
@@ -105,9 +109,9 @@ ClaudeAgentOptions(
 
 四個磁碟位置:
 
-- CLAUDE.md (檔案,git 管)
-- memories/user-profile.md (檔案,git 管,但偏好細節 .gitignore)
-- memories/learnings.md (檔案,git 管,但個人資料 .gitignore)
+- docs/00-agent-identity.md (檔案,git 管,L1 不可變憲法)
+- memories/user-profile.md (執行期檔案,gitignored;`.example` 版本 git tracked)
+- memories/learnings.md (執行期檔案,gitignored;`.example` 版本 git tracked)
 - memories/sessions/YYYY-MM-DD.md (檔案,.gitignore)
 
 後續可升級到 Anthropic Managed Agents Memory(Layer 4 機制),但 W1-W3 先用檔案版,簡單夠用。
@@ -118,7 +122,7 @@ ClaudeAgentOptions(
 1. User → Telegram: "幫我看一下狀況"
 2. Telegram → service(webhook): { message: "..." }
 3. service → Agent SDK: query(prompt="...", options=...)
-4. Agent SDK loads CLAUDE.md + memory files (Tier 1, 自動)
+4. Agent SDK loads docs/00-agent-identity.md as system_prompt + memory files (Tier 1, 自動)
 5. Agent 規劃:需要呼叫 gmail + bluesky 兩個 tool
 6. Agent → PreToolUse hook(gmail__list_unread): Tier 1 → 放行
 7. Agent → mcp__gmail__list_unread → 取得 47 封未讀
