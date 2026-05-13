@@ -18,7 +18,10 @@ SYSTEM_PROMPT_PATH = REPO_ROOT / "docs" / "00-agent-identity.md"
 
 def load_system_prompt() -> str:
     raw = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
-    return raw.format(USER_NAME=os.environ["USER_NAME"])
+    # docs/00 contains other `{...}` placeholders ({today}, {YYYY-MM-DD}) that
+    # are meant for the agent at runtime — not Python format args. Use literal
+    # replace so we only substitute the one variable we own.
+    return raw.replace("{USER_NAME}", os.environ["USER_NAME"])
 
 
 def build_options() -> ClaudeAgentOptions:
