@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+.eggs/
+build/
+dist/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Virtualenv
+.venv/
+venv/
+env/
+ENV/
+
+# Secrets / config
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Runtime state — never commit individual-user data
+memories/user-profile.md
+memories/learnings.md
+memories/sessions/
+trust/curves.json
+logs/
+KILL.flag
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Claude Code local scratch
+.claude/plans/
