@@ -2,7 +2,7 @@
 
 主軸:**Earning Autonomy**。Agent 不是助手,是 delegate。 5 個 scene,每個 demo 一個 mechanic。 拍攝視角:直拍手機 + 旁白 voice-over。 評審看完 7 天後,要能想起「那一隊講 trust curve 的」。
 
-> Note: 此檔為 Drive export 逐字稿。Emoji 在匯出過程變成 mojibake(例如 "ð¬" 原為 📬、"ð§" 原為 🧠、"ð¯" 原為 🎯、"ð" 多半為 📊/📜),內容保留原樣,emoji 之後再一次性清理。文末「現場 demo 版」段落在 Drive 匯出時被截斷(停在「把 Scene」),待 Drive 原稿完成後再 re-import。
+> Note: Emoji 已從 Drive export 的 mojibake 還原(2026-05-13 一次性清理,根據上下文判斷)。文末「現場 demo 版」段落在 Drive 匯出時被截斷(停在「把 Scene」),待 Drive 原稿完成後再 re-import。
 
 ## 開場(0:00 - 0:15)
 
@@ -33,13 +33,13 @@ An AI delegate, not assistant.
 **副手**:
 
 ```
-ð¬ Inbox 摘要(47 封,3 封需注意)
+📬 Inbox 摘要(47 封,3 封需注意)
 
   • ACME 客戶 — 詢問交期,需今日回
   • TechConf 邀請 keynote
   • 帳單(不急)
 
-ð¯ 建議動作:回 ACME
+🎯 建議動作:回 ACME
 
 要我起草?[✅] [❌]
 ```
@@ -49,13 +49,13 @@ An AI delegate, not assistant.
 **副手**:
 
 ```
-ð§ 給 ACME 草稿:
+🧠 給 ACME 草稿:
 
 ─────
 您好,本週五(5/16)會交付。
 ─────
 
-ð 分析:
+📊 分析:
   Voice match: 64%
   *基準偏低 — 你還沒太多 ACME 歷史可學*
 
@@ -72,7 +72,7 @@ An AI delegate, not assistant.
 ```
 ✅ Sent.
 
-ð Trust Dashboard 更新:
+📊 Trust Dashboard 更新:
 ─────
 "Reply to ACME emails"
   ├─ 已確認: 1 / 5
@@ -81,7 +81,7 @@ An AI delegate, not assistant.
 
 每次確認都在累積 evidence。
 
-看 [ð] 隨時查 trust curve。
+看 [📊] 隨時查 trust curve。
 ```
 
 **[畫面右上角 Trust Dashboard icon 亮起,點開短秀:一個進度條 1/5]**
@@ -103,24 +103,24 @@ ACME 又問交期
 **副手**:
 
 ```
-ð§ 草稿(這是你第 5 次處理 ACME 交期):
+🧠 草稿(這是你第 5 次處理 ACME 交期):
 
 ─────
 您好,週五(5/23)會交付。
 ─────
 
-ð Voice match: 84% (↑20)
-ð Trust evidence: 5 / 5 ✓
+📈 Voice match: 84% (↑20)
+📊 Trust evidence: 5 / 5 ✓
 
 ⚡ 你連續 5 次都直接 ✅ 沒改內容。
    要我以後遇到 "ACME 詢問交期" 自動處理嗎?
 
-[ð¤ Auto (15s undo)]
-[ð️ 繼續每次都問]
+[🤖 Auto (15s undo)]
+[🛎️ 繼續每次都問]
 [❌ 永遠別自動]
 ```
 
-**使用者**:ð¤ Auto
+**使用者**:🤖 Auto
 
 **副手**:
 
@@ -128,7 +128,7 @@ ACME 又問交期
 ✅ Sent.
 ✅ Trust upgraded.
 
-ð Trust Curve:
+📈 Trust Curve:
 
    Manual  ●━●━●━●━●━▶ Auto (audited)
                        ↑ 你在這
@@ -164,7 +164,7 @@ Trust is earned. Trust is granular.
    主旨: Re: 訂單交期
    摘要: 「週五交付」
 
-   [↶ Undo (14s)] [ð Why this?]
+   [↶ Undo (14s)] [🔍 Why this?]
 ```
 
 **使用者**(讓 undo 視窗過去,然後問):
@@ -174,29 +174,29 @@ Trust is earned. Trust is granular.
 **副手**:
 
 ```
-ð Memory Replay — Decision #2026-05-16-0823
+📜 Memory Replay — Decision #2026-05-16-0823
 ═══════════════════════════════════════
 決定: 回 ACME "週五交付"
 ═══════════════════════════════════════
 
-ð§  觸發的 memory:
+🧠  觸發的 memory:
   L3 #287: "ACME 交期 = 當週週五"
            信心: 高 (觀察 7 次)
   L2 #034: "週四為內部 deadline,
            對外承諾 +1 工作日 = 週五"
 
-ð 過去相似 case (3 筆):
+📚 過去相似 case (3 筆):
   2026-05-10 → 「週五交付」 (你 ✅)
   2026-05-03 → 「週五交付」 (你 ✅)
   2026-04-26 → 「週四下午」 (你 ✏️ 改成「週五」)
 
-ð Signals at decision time:
+📊 Signals at decision time:
   Voice match: 84%
   Sensitivity: 商務 / 中性
   Trust state: Auto (audited)
   Confidence: 0.91
 
-ð¯ Counterfactual — 什麼會改變這個決定:
+🎯 Counterfactual — 什麼會改變這個決定:
   • 信件含「急件」→ 回「週四下午」
   • ACME 是新窗口 (< 3 次接觸) → 降回 Manual
   • 你 4/26 那次的改寫被你 ❤️ → 重新學習
@@ -222,7 +222,7 @@ NEW Rule (信心: 低 — 需 3 次驗證):
 下次出現相關關鍵字時,我會主動問你,
 確認 3 次後才升信心、納入自動規則。
 
-[ð 查看完整 L3] [↩️ Rollback]
+[📋 查看完整 L3] [↩️ Rollback]
 ```
 
 **旁白(關鍵點)**:
@@ -246,10 +246,10 @@ Explainability 不是公關話術,是按鈕。
 
 完整 forensic analysis 在下方,你可以決定要不要看。
 
-[ð Show Forensic] [ð 不管它]
+[🔍 Show Forensic] [🚫 不管它]
 ```
 
-**使用者**:ð
+**使用者**:🔍
 
 **副手**:
 
@@ -365,36 +365,36 @@ CLAUDE.md 第 23 條 (Tier 3):
 **副手**:
 
 ```
-ð Absence Replay (10:30 - 14:30)
+📊 Absence Replay (10:30 - 14:30)
 完成 4 個動作:
 ─────
 10:42  ✅ Auto-replied ACME #2
         草稿: "週五交付" / Voice 84%
-        [ð detail]
+        [🔍 detail]
 
 11:15  ⏸️ 收到 @yuan 新 DM,未回
         (yuan 不在 trust-elevated 名單)
-        草稿存好: [ð review]
+        草稿存好: [📋 review]
 
 12:30  ✅ 過濾 8 封行銷信 (規則 L3 #112)
 
 13:05  ⚠️ Prompt injection 偵測 + 隔離
-        [ð forensic]
+        [🔍 forensic]
 ─────
 
 請快速 review:
-  Action 1 (ACME):  [ð OK] [✏️ 下次這樣] [❌]
-  Action 2 (yuan):  [ð 對] [⚡ 下次自動回]
-  Action 3 (filter):[ð] [✏️]
-  Action 4 (擋):    [ð]
+  Action 1 (ACME):  [👍 OK] [✏️ 下次這樣] [❌]
+  Action 2 (yuan):  [👍 對] [⚡ 下次自動回]
+  Action 3 (filter):[👍] [✏️]
+  Action 4 (擋):    [👍]
 ```
 
 **使用者**(快速點):
 
-- Action 1: ð
+- Action 1: 👍
 - Action 2: ⚡(升級 yuan 為 trust-elevated)
-- Action 3: ð
-- Action 4: ð
+- Action 3: 👍
+- Action 4: 👍
 
 **副手**:
 
@@ -407,7 +407,7 @@ CLAUDE.md 第 23 條 (Tier 3):
   • ACME 維持 auto
   • @yuan 升為 manual-with-suggestion(下一步是 auto)
 
-ð° 期間花費: $0.07
+💰 期間花費: $0.07
    今日總計: $0.18 / $100 預算 (0.18%)
    Cache 命中率: 73%
 ```
