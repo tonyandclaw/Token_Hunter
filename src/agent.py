@@ -39,6 +39,7 @@ from src.audit import AuditEvent, AuditLogger, TokenUsage, sha256_short
 from src.permissions import Tier, classify, refusal_message
 from src.tier2_confirm import DEFAULT_CONFIRM_TIMEOUT, ConfirmRegistry, OnSubmit, await_decision
 from src.tools.gmail_mcp import build_server as build_gmail_server
+from src.tools.memory_mcp import build_server as build_memory_server
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SYSTEM_PROMPT_PATH = REPO_ROOT / "docs" / "00-agent-identity.md"
@@ -159,6 +160,7 @@ def build_options(
     confirm_registry: ConfirmRegistry | None = None,
     notify: OnSubmit | None = None,
     enable_gmail: bool = True,
+    enable_memory: bool = True,
 ) -> ClaudeAgentOptions:
     sid = session_id or uuid.uuid4().hex
     audit = AuditLogger()
@@ -170,6 +172,8 @@ def build_options(
     mcp_servers: dict[str, Any] = {}
     if enable_gmail:
         mcp_servers["gmail"] = build_gmail_server()
+    if enable_memory:
+        mcp_servers["memory"] = build_memory_server()
 
     return ClaudeAgentOptions(
         model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-6-2026V2"),
