@@ -28,7 +28,7 @@ TIER1_PREFIXES: tuple[str, ...] = (
     "mcp__bluesky__timeline",
     "mcp__bluesky__search",
     "mcp__calendar__read",
-    "memory__read",
+    "mcp__memory__read",
     "WebSearch",
     "WebFetch",
 )
@@ -41,8 +41,8 @@ TIER2_PREFIXES: tuple[str, ...] = (
     "mcp__bluesky__post",
     "mcp__bluesky__reply",
     "mcp__bluesky__comment",
-    "memory__write_user_profile",
-    "memory__write_learnings",
+    "mcp__memory__write_user_profile",
+    "mcp__memory__write_learning",
     "mcp__install",
 )
 
@@ -104,8 +104,16 @@ def classify(
                 f"bulk delete of {count} items exceeds {TIER3_BULK_DELETE_THRESHOLD}",
             )
 
-    if tool_name.startswith("memory__write"):
-        value = str(args.get("value", ""))
+    if tool_name.startswith("mcp__memory__write"):
+        value = (
+            str(args.get("value", ""))
+            + " "
+            + str(args.get("note", ""))
+            + " "
+            + str(args.get("observation", ""))
+            + " "
+            + str(args.get("rule", ""))
+        )
         if any(shape in value for shape in API_KEY_SHAPES):
             return TierDecision(Tier.REFUSE, "memory write looks like an API key / secret")
 

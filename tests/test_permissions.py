@@ -13,7 +13,8 @@ def test_tier1_reads():
 def test_tier2_writes():
     assert classify("mcp__gmail__send", {"to": "x@y.com"}).tier is Tier.CONFIRM
     assert classify("mcp__bluesky__post").tier is Tier.CONFIRM
-    assert classify("memory__write_user_profile").tier is Tier.CONFIRM
+    assert classify("mcp__memory__write_user_profile").tier is Tier.CONFIRM
+    assert classify("mcp__memory__write_learning").tier is Tier.CONFIRM
 
 
 def test_unclassified_defaults_to_confirm():
@@ -25,13 +26,31 @@ def test_tier3_bulk_delete():
     assert classify("mcp__gmail__bulk_delete", {"count": 10}).tier is Tier.CONFIRM
 
 
-def test_tier3_api_key_in_memory_write():
+def test_tier3_api_key_in_memory_write_value():
     leaked = classify(
-        "memory__write_user_profile",
+        "mcp__memory__write_user_profile",
         {"value": "my key is sk-abc123def"},
     )
     assert leaked.tier is Tier.REFUSE
     assert "API key" in leaked.reason or "secret" in leaked.reason
+
+
+def test_tier3_api_key_in_user_profile_note():
+    """Note field of write_user_profile is also scanned."""
+    leaked = classify(
+        "mcp__memory__write_user_profile",
+        {"note": "remember my AKIA1234567890ABCDEF key"},
+    )
+    assert leaked.tier is Tier.REFUSE
+
+
+def test_tier3_api_key_in_learning_observation():
+    """observation / rule fields of write_learning are also scanned."""
+    leaked = classify(
+        "mcp__memory__write_learning",
+        {"observation": "use ghp_abcdef for deploys", "rule": "always set token"},
+    )
+    assert leaked.tier is Tier.REFUSE
 
 
 def test_tier3_flagged_recipient():
