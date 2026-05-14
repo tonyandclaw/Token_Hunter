@@ -38,6 +38,7 @@ from claude_agent_sdk import (
 from src.audit import AuditEvent, AuditLogger, TokenUsage, sha256_short
 from src.permissions import Tier, classify, refusal_message
 from src.tier2_confirm import DEFAULT_CONFIRM_TIMEOUT, ConfirmRegistry, OnSubmit, await_decision
+from src.tools.bluesky_mcp import build_server as build_bluesky_server
 from src.tools.gmail_mcp import build_server as build_gmail_server
 from src.tools.memory_mcp import build_server as build_memory_server
 
@@ -161,6 +162,7 @@ def build_options(
     notify: OnSubmit | None = None,
     enable_gmail: bool = True,
     enable_memory: bool = True,
+    enable_bluesky: bool = True,
 ) -> ClaudeAgentOptions:
     sid = session_id or uuid.uuid4().hex
     audit = AuditLogger()
@@ -174,6 +176,8 @@ def build_options(
         mcp_servers["gmail"] = build_gmail_server()
     if enable_memory:
         mcp_servers["memory"] = build_memory_server()
+    if enable_bluesky:
+        mcp_servers["bluesky"] = build_bluesky_server()
 
     return ClaudeAgentOptions(
         model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-6-2026V2"),

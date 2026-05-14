@@ -17,6 +17,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pydantic>=2.7.0",
     "imap-tools>=1.6",
+    "atproto>=0.0.50",
 ]
 
 [project.optional-dependencies]
@@ -26,9 +27,6 @@ dev = [
     "ruff>=0.5.0",
     "pip-audit>=2.7.0",
 ]
-
-# W3+ deps — uncomment as features land
-# bluesky = ["atproto>=0.0.50"]
 
 [tool.setuptools.packages.find]
 where = ["."]
