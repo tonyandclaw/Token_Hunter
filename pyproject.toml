@@ -16,6 +16,7 @@ dependencies = [
     "httpx>=0.27.0",
     "python-dotenv>=1.0.0",
     "pydantic>=2.7.0",
+    "imap-tools>=1.6",
 ]
 
 [project.optional-dependencies]
@@ -26,8 +27,7 @@ dev = [
     "pip-audit>=2.7.0",
 ]
 
-# W2+ deps — uncomment as features land
-# gmail   = ["imap-tools>=1.6"]
+# W3+ deps — uncomment as features land
 # bluesky = ["atproto>=0.0.50"]
 
 [tool.setuptools.packages.find]
