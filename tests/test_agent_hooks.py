@@ -6,11 +6,20 @@ the async callbacks directly — no SDK runtime needed.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
-from src.agent import _hash_input, make_post_tool_use_hook, make_pre_tool_use_hook
+from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+
+from src.agent import (
+    _hash_input,
+    make_can_use_tool,
+    make_post_tool_use_hook,
+    make_pre_tool_use_hook,
+)
 from src.audit import AuditLogger
+from src.tier2_confirm import ConfirmRegistry
 
 
 def _pre_input(tool_name: str, tool_input: dict | None = None) -> dict:
@@ -101,3 +110,54 @@ def test_hash_input_only_hashes_sensitive_fields():
     assert "body" not in out
     assert "subject_hash" in out
     assert "body_hash" in out
+
+
+async def test_can_use_tool_allow_when_user_approves():
+    registry = ConfirmRegistry()
+
+    async def notify(cid: str, _prompt: str) -> None:
+        registry.resolve(cid, approved=True)
+
+    can_use = make_can_use_tool(registry, notify)
+    result = await can_use(
+        "mcp__gmail__send",
+        {"to": "a@b"},
+        None,  # type: ignore[arg-type]
+    )
+    assert isinstance(result, PermissionResultAllow)
+
+
+async def test_can_use_tool_deny_when_user_rejects():
+    registry = ConfirmRegistry()
+
+    async def notify(cid: str, _prompt: str) -> None:
+        registry.resolve(cid, approved=False)
+
+    can_use = make_can_use_tool(registry, notify)
+    result = await can_use(
+        "mcp__bluesky__post",
+        {"text": "x"},
+        None,  # type: ignore[arg-type]
+    )
+    assert isinstance(result, PermissionResultDeny)
+    assert "未確認" in result.message
+
+
+async def test_can_use_tool_deny_on_timeout():
+    """User never confirms; can_use_tool falls back to Deny after timeout."""
+    registry = ConfirmRegistry()
+    notified = asyncio.Event()
+
+    async def notify(_cid: str, _prompt: str) -> None:
+        # Don't resolve — let it time out
+        notified.set()
+
+    can_use = make_can_use_tool(registry, notify, timeout_seconds=0.05)
+    result = await can_use(
+        "mcp__gmail__send",
+        {"to": "a@b"},
+        None,  # type: ignore[arg-type]
+    )
+    assert isinstance(result, PermissionResultDeny)
+    assert notified.is_set()
+    assert registry.pending_count() == 0

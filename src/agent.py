@@ -5,11 +5,15 @@ agent's L1 constitution; modifying it is a Tier 3 forbidden action. CLAUDE.md
 is Claude Code dev guidance and is NOT loaded here.
 
 Hook wiring:
-- PreToolUse  → src.permissions.classify(): Tier 1 allow, Tier 3 deny with
-                fixed refusal message, Tier 2 routed to "ask" (Telegram
-                inline-confirm UX lands in a follow-up PR).
-- PostToolUse → src.audit.AuditLogger: one JSONL event per call, with
-                tool_input hashed to subject_hash / body_hash per docs/04 §E.
+- PreToolUse   → src.permissions.classify(): Tier 1 allow, Tier 3 deny with
+                 fixed refusal message, Tier 2 routed to "ask".
+- can_use_tool → src.tier2_confirm.await_decision(): sends a Telegram
+                 inline-button confirm and awaits user reply (5-min timeout
+                 auto-rejects). Only attached when a ConfirmRegistry +
+                 notifier are provided; otherwise Tier 2 falls through to
+                 the SDK's default ask path.
+- PostToolUse  → src.audit.AuditLogger: one JSONL event per call, with
+                 tool_input hashed to subject_hash / body_hash per docs/04 §E.
 """
 
 from __future__ import annotations
@@ -23,13 +27,17 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     HookContext,
     HookMatcher,
+    PermissionResultAllow,
+    PermissionResultDeny,
     PostToolUseHookInput,
     PreToolUseHookInput,
+    ToolPermissionContext,
     query,
 )
 
 from src.audit import AuditEvent, AuditLogger, TokenUsage, sha256_short
 from src.permissions import Tier, classify, refusal_message
+from src.tier2_confirm import DEFAULT_CONFIRM_TIMEOUT, ConfirmRegistry, OnSubmit, await_decision
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SYSTEM_PROMPT_PATH = REPO_ROOT / "docs" / "00-agent-identity.md"
@@ -114,15 +122,56 @@ def make_post_tool_use_hook(session_id: str, audit: AuditLogger):
     return post
 
 
-def build_options(session_id: str | None = None) -> ClaudeAgentOptions:
+def make_can_use_tool(
+    registry: ConfirmRegistry,
+    notify: OnSubmit,
+    *,
+    timeout_seconds: float = DEFAULT_CONFIRM_TIMEOUT,
+):
+    """Build the SDK's can_use_tool callback that drives the Tier-2 confirm loop."""
+
+    async def can_use_tool(
+        tool_name: str,
+        tool_input: dict[str, Any],
+        _ctx: ToolPermissionContext,
+    ) -> PermissionResultAllow | PermissionResultDeny:
+        _confirm_id, approved = await await_decision(
+            registry,
+            tool_name,
+            tool_input,
+            on_submit=notify,
+            timeout_seconds=timeout_seconds,
+        )
+        if approved:
+            return PermissionResultAllow()
+        return PermissionResultDeny(
+            message="使用者未確認(拒絕或逾時)",
+            interrupt=False,
+        )
+
+    return can_use_tool
+
+
+def build_options(
+    session_id: str | None = None,
+    *,
+    confirm_registry: ConfirmRegistry | None = None,
+    notify: OnSubmit | None = None,
+) -> ClaudeAgentOptions:
     sid = session_id or uuid.uuid4().hex
     audit = AuditLogger()
+
+    can_use_tool = None
+    if confirm_registry is not None and notify is not None:
+        can_use_tool = make_can_use_tool(confirm_registry, notify)
+
     return ClaudeAgentOptions(
         model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-6-2026V2"),
         max_turns=10,
         permission_mode="default",
         allowed_tools=[],
         system_prompt=load_system_prompt(),
+        can_use_tool=can_use_tool,
         hooks={
             "PreToolUse": [HookMatcher(hooks=[make_pre_tool_use_hook(sid)])],
             "PostToolUse": [HookMatcher(hooks=[make_post_tool_use_hook(sid, audit)])],
@@ -130,9 +179,19 @@ def build_options(session_id: str | None = None) -> ClaudeAgentOptions:
     )
 
 
-async def reply(user_message: str, *, session_id: str | None = None) -> str:
+async def reply(
+    user_message: str,
+    *,
+    session_id: str | None = None,
+    confirm_registry: ConfirmRegistry | None = None,
+    notify: OnSubmit | None = None,
+) -> str:
     """Send one user turn, collect text response. session_id is propagated to hooks."""
-    options = build_options(session_id)
+    options = build_options(
+        session_id,
+        confirm_registry=confirm_registry,
+        notify=notify,
+    )
     chunks: list[str] = []
     async for event in query(prompt=user_message, options=options):
         text = getattr(event, "text", None)
