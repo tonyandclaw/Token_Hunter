@@ -84,6 +84,10 @@ Manual → Auto(audited, 15s undo) → Auto(silent, log) → ... → Full
 **視覺**:Trust Curve 動畫截圖(1/5 → 5/5 → 升級的瞬間)
 **數據**:Demo 中第 5 次 confirm 觸發自動 promotion
 
+**Proof anchor (W4 build status)**:
+- Tier-2 confirm UX(✅/❌ inline button + 5 分鐘 timeout):`src/tier2_confirm.py` + `src/main.py:on_confirm_button`(PR #6,10 tests)
+- 自動 promotion(N 次後 agent 主動問升級)**尚未實作**(W5 buffer);demo 期間 Trust Curve 部分以「每次 confirm 都是 Tier 2」呈現;Slide 標示 "5 段階梯" 為產品 vision,程式碼當前是 Tier 1/2/3 三段
+
 ## Slide 6 — Mechanic #2:Memory Replay
 
 **標題**:**每個決定按一個鈕看到完整推理**
@@ -100,6 +104,13 @@ Manual → Auto(audited, 15s undo) → Auto(silent, log) → ... → Full
 
 **視覺**:Memory Replay UI 截圖(像 git blame 的層次 layout)
 
+**Proof anchor**:
+- L3 結構化 four-field block + anti-overfit 強制(信心度「高」需 ≥5 觀察才允許,否則 downgrade + warn):`src/memory_writes.py:append_learning`(PR #8,12 tests)
+- L3 append-only(校正創新 entry,不覆寫舊 high-confidence):`test_writes_never_overwrite_existing_content`(PR #8)
+- L1 immutable + 每 session reload:`src/agent.py:load_system_prompt`(PR #1+#2)
+- Audit log per-decision data:`src/audit.py:AuditEvent`(PR #3)
+- **[Why this?] 按鈕 UI 尚未實作**(W5);demo 用 `logs/{date}.jsonl` 直接展示 raw 資料當 fallback,參考 docs/08 §Scene 1
+
 ## Slide 7 — Mechanic #3:Voice Match 量化
 
 **標題**:**「越用越懂你」— 量化版**
@@ -115,6 +126,8 @@ Manual → Auto(audited, 15s undo) → Auto(silent, log) → ... → Full
 **視覺**:4 週 voice match 走勢圖 + 一行「為什麼 80% 是上限」解釋
 
 **對比**:**沒有其他隊會給數字。** 大家都說「越用越懂你」,只有副手量化它。
+
+**Proof anchor**:**Slide 7 是 W5 deliverable,當前 build 尚未實作 `src/voice_scorer.py`**。6/12 書審用 demo 不展示 84% 數字;若評審現場問,直說「演算法已設計(句長 / 詞彙重疊 / 結構模式三維度,80% 上限),W5 實作」。誠實 > 假數字。
 
 ## Slide 8 — Mechanic #4:Forensic Security
 
@@ -142,6 +155,11 @@ Defense triggered:
 
 **視覺**:Forensic report 截圖
 
+**Proof anchor**:
+- Tier-3 hard-block(API-key shape / 含 `sk-`/`AKIA`/`ghp_` 等 5 種樣式 / bulk_delete > 10 / flagged recipient):`src/permissions.py:classify`(PR #3 + #8,8 tests)
+- 外部內容當 untrusted + 無法觸發 Tier 2/3:由 PreToolUse hook 在 `src/agent.py:make_pre_tool_use_hook` 強制(PR #4)
+- 完整 forensic 報告(domain Levenshtein / SPF / DKIM / injection DB):**`src/forensic.py` 尚未實作**(W5)。Demo 中 fallback 為「Tier-3 deny + audit log entry」,參考 docs/08 §Scene 4
+
 ## Slide 9 — Mechanic #5:Absence Mode
 
 **標題**:**真正的「你不在我自己處理」**
@@ -158,6 +176,8 @@ Defense triggered:
 **關鍵句**:
 
 Absence Mode 不是「你看我做了什麼」,是 **structured replay + 一鍵 update memory**。
+
+**Proof anchor**:**Absence Mode 尚未實作**(W5 buffer)。當前 build 已具備所有底層元件 — L4 session log(`src/session_log.py`,PR #3)、AuditLogger(`src/audit.py`,PR #3+#4)、Tier 系統(PR #3-#8)— Replay UI + 一鍵 update memory 是 W5 在這些基礎上組裝。Demo 期間 Slide 9 為產品 vision,不展示。
 
 ## Slide 10 — Architecture(壓縮版)
 
@@ -181,6 +201,10 @@ Telegram → Python (WSL2) → Claude Agent SDK (Opus 4.6)
 
 **視覺**:架構圖,自家元件高亮
 
+**Proof anchor**:
+- 已建:gmail / bluesky / memory / kimi_bulk MCP wrappers(PR #3, #7, #8, #9);Permission / Audit / CostMeter / KillSwitch cross-cutting concerns(PR #3-#5, #10)
+- 三大自家元件(ReplayEngine / VoiceScorer / ForensicAnalyzer)**尚未實作** — W5 deliverable。書審用版本是 architecture vision;Slide 11 用 Permission + Audit + CostMeter 證明「不只是接 LLM」
+
 ## Slide 11 — ASUS 資安規範對應
 
 **標題**:**七大風險 7/7、七大應對 7/7、Do/Don't 全條符合**
@@ -190,6 +214,16 @@ Telegram → Python (WSL2) → Claude Agent SDK (Opus 4.6)
 Indirect Prompt Injection 在 Scene 4 **實際 demo + 完整 forensic**,不是 PPT 上說擋就擋
 
 **視覺**:打勾的對照表(從 docs/04-security-design.md 壓縮)
+
+**Proof anchor**(對應 ASUS 七大風險,真的有 code 跑):
+- 風險 1 (Indirect Prompt Injection): `src/permissions.py` Tier 3 + `src/agent.py` PreToolUse hook(PR #3, #4)
+- 風險 2 (Excessive Agency): Tier 2 confirm UX `src/tier2_confirm.py`(PR #6)
+- 風險 3 (Sensitive Info Disclosure): Audit log subject/body 強制 hash `src/agent.py:_hash_input`(PR #4);API-key shape 偵測 `src/permissions.py:API_KEY_SHAPES`(PR #8)
+- 風險 4 (Improper Output Handling): 外部內容當 untrusted policy 寫在 `docs/00-agent-identity.md`,系統 prompt 帶入
+- 風險 5 (Memory Poisoning): L3 anti-overfit ≥5 觀察才 "高" + append-only `src/memory_writes.py`(PR #8)
+- 風險 6 (Resource Exhaustion / Cost): CostMeter 50/80/100/120% alert + 120% halt `src/cost_meter.py` + `src/main.py`(PR #5, #10)
+- 風險 7 (Unauthorized Access): Telegram `ALLOWED_USERS` whitelist `src/main.py:_allowed_user_ids`(PR #1)
+- 完整對照細節:`docs/07-build-status.md`
 
 ## Slide 12 — 成本控制
 
@@ -205,6 +239,12 @@ Indirect Prompt Injection 在 Scene 4 **實際 demo + 完整 forensic**,不是 P
 **數據**:**$100 預算可用 4+ 個月**
 
 **視覺**:成本分布圓餅圖 + 走勢圖
+
+**Proof anchor**:
+- 異質模型 routing heuristic(>500 chars OR batch>3 OR translate/rewrite → Kimi):`src/tools/kimi_bulk.py:should_offload`(PR #3,6 tests)
+- CostMeter usage tally + threshold engine:`src/cost_meter.py`(PR #5,9 tests)
+- Per-turn alert dispatch + 120% halt:`src/main.py:on_message`(PR #10,5 tests)
+- Single-cycle $0.13 → $0.06、cache hit 73% **是設計目標,實測待真實 demo run**(W4 後)
 
 ## Slide 13 — 商業化(誠實 V1/V2/V3)
 
