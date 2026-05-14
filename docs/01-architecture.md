@@ -40,8 +40,10 @@ ClaudeAgentOptions(
     permission_mode="default",  # 走我們自己的 hooks
     allowed_tools=[...],
     hooks={"PreToolUse": [permission_gate], "PostToolUse": [audit_log]},
-    system_prompt=open("docs/00-agent-identity.md").read().format(
-        USER_NAME=os.environ["USER_NAME"],
+    system_prompt=(
+        open("docs/00-agent-identity.md")
+        .read()
+        .replace("{USER_NAME}", os.environ["USER_NAME"])
     ),
 )
 ```

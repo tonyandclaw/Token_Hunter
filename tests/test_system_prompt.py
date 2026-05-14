@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 from src.agent import load_system_prompt
 
 
@@ -20,5 +18,5 @@ def test_constitution_is_docs_00(monkeypatch):
     """Confirm we never accidentally load CLAUDE.md as system_prompt."""
     monkeypatch.setenv("USER_NAME", "x")
     prompt = load_system_prompt()
-    # CLAUDE.md-only sentinel string from the dev guidance file
-    assert "Claude Code (claude.ai/code)" not in prompt
+    # docs/00 H1 must be the first line; CLAUDE.md's H1 is "# CLAUDE.md"
+    assert prompt.startswith("# 副手 — Agent Identity & Operating Rules")
