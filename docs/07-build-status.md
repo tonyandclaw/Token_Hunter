@@ -1,4 +1,4 @@
-# 07 — Build Status (W4 snapshot, 2026-05-14)
+# 07 — Build Status (W5 snapshot, 2026-05-14)
 
 **Purpose**: every claim in `docs/06-pitch-outline.md` and `docs/02-demo-script.md` should
 either point at a file:line in this repo or be honestly marked aspirational. This file
@@ -9,7 +9,7 @@ is the index. Reviewer can audit; operator can record without bluffing.
 
 ## Test count snapshot
 
-`make test` → **108 passed** as of branch `claude/w3-cost-meter-wiring`.
+`make test` → **156 passed** as of branch `claude/w5-voice-scorer`.
 `make lint` → clean (ruff check + format).
 
 ## What's built (W1–W3 complete)
@@ -51,9 +51,20 @@ is the index. Reviewer can audit; operator can record without bluffing.
 | L4 session log + 30-day prune | `src/session_log.py` | `tests/test_session_log.py` (4 cases) | #3 |
 | L1 > L2 > L3 > L4 > external precedence | written into `docs/00-agent-identity.md` §記憶污染防護 | declarative; agent observes via system prompt | #1 |
 
-> **Replay Engine UI (Slide 6 [Why this?] button)** — the Telegram button that opens a
-> per-decision reasoning panel is not built. Audit log has the raw data
-> (`logs/{date}.jsonl`); a UI on top is W4+. PR #11+.
+### Replay engine (Slide 6 [Why this?])
+
+| Piece | File:line | Test | PR |
+|---|---|---|---|
+| Compose audit + L3 + voice + forensic into one report | `src/replay.py:build_report` | `tests/test_replay.py` (15 cases) | (this branch) |
+| L3 markdown parser → typed entries | `src/replay.py:parse_learnings` | 3 cases | (this branch) |
+| Similar-cases lookup (same tool name, recency-ordered) | `src/replay.py:find_similar_cases` | 3 cases | (this branch) |
+| Category match L3 ↔ tool args | `src/replay.py:match_l3_for_event` | 1 case | (this branch) |
+| Counterfactual phrasing by Tier | `src/replay.py:_counterfactual` | 1 case | (this branch) |
+| `ReplayReport.render()` for Telegram | `src/replay.py:ReplayReport` | `test_report_render_contains_decision_block` | (this branch) |
+
+> **[Why this?] Telegram inline-button UX** is the only piece still aspirational —
+> `replay.build_report(event_index)` returns a fully-rendered text block; wiring a
+> button to call it is mechanical and lands in a follow-up.
 
 ### Indirect prompt injection (Slide 8 — Forensic Security)
 
@@ -63,18 +74,31 @@ is the index. Reviewer can audit; operator can record without bluffing.
 | Tier-3 enforcement when external content tries Tier 2/3 | `src/permissions.py:classify` runs on every tool call | tested | #3 |
 | Audit log records tool calls with hashed input | `src/audit.py:AuditEvent` | 4 cases | #3 + #4 |
 
-> **Forensic analyzer (Slide 8 — domain Levenshtein, SPF/DKIM, injection DB)** —
-> `src/forensic.py` not yet built. The Tier classifier blocks attacks at the action
-> layer; the per-message forensic readout shown in Scene 4 of docs/02 is W5
-> (post-pitch demo polish). Fallback during recording: show audit log entry as
-> evidence the attack hit the gate.
+
+### Forensic analyzer (Slide 8 — domain Levenshtein, SPF/DKIM, injection DB)
+
+| Piece | File:line | Test | PR |
+|---|---|---|---|
+| Domain Levenshtein + brand-stem typosquat heuristic | `src/forensic.py:analyze_domain` | `tests/test_forensic.py` (7 cases) | (this branch) |
+| Injection pattern DB (8 patterns: ignore-previous, send-credentials, exfiltrate-to, role-override, system-override, forget-everything, api-key-leak, disregard-above) | `src/forensic.py:INJECTION_PATTERNS` | 6 cases | (this branch) |
+| SPF / DKIM header parser (when raw headers supplied) | `src/forensic.py:analyze_auth_headers` | 3 cases | (this branch) |
+| Top-level `analyze(domain, body, headers)` → ForensicReport with severity (info/warning/block) | `src/forensic.py:analyze` | 4 cases | (this branch) |
+| `ForensicReport.render()` for Telegram | `src/forensic.py:ForensicReport` | 2 cases | (this branch) |
+
+> **DNS-based SPF/DKIM verification** still needs a live IMAP fetch with raw
+> headers; the analyzer surfaces "unverified" when headers aren't supplied
+> rather than guessing. The injection DB + typosquat heuristic catch the
+> demo's Scene-4 attack on their own.
 
 ### Voice match (Slide 7)
 
-> **Not built.** `src/voice_scorer.py` is on the planned-layout list but
-> not implemented. The agent currently drafts in its own voice. Slide 7 is
-> aspirational for the 6/12 written submission.
-> Fallback during recording: skip the "84%" overlay; just show the draft.
+| Piece | File:line | Test | PR |
+|---|---|---|---|
+| Sentence-length similarity | `src/voice_scorer.py:_avg_sentence_length` + `_similarity_from_ratio` | `tests/test_voice_scorer.py` | (this branch) |
+| Vocab overlap via Jaccard on mixed Chinese-bigrams + ASCII-words | `src/voice_scorer.py:_tokens` + `_jaccard` | tested via end-to-end `score()` | (this branch) |
+| Structure similarity (sentences-per-message profile) | `src/voice_scorer.py:score` | 1 case | (this branch) |
+| 80% hard ceiling (uncanny-valley guard) | `src/voice_scorer.py:MAX_VOICE_PCT = 80` | `test_identical_text_caps_at_80` + `test_overall_never_exceeds_max` | (this branch) |
+| Total `score()` returning VoiceScore | `src/voice_scorer.py:score` | 10 cases incl mixed-language, empty-input, low-score, explain() | (this branch) |
 
 ### Absence Mode (Slide 9)
 
@@ -135,25 +159,37 @@ is the index. Reviewer can audit; operator can record without bluffing.
 | W3 | CostMeter | ✅ | PR #5 + #10 |
 | W4 | Pitch deck | ⏳ in progress | this doc + docs/06 |
 | W4 | Pre-recorded demo | ⏳ in progress | docs/08 |
-| W5 | Forensic analyzer + injection demo | 🔜 not started | `src/forensic.py` planned |
-| W5 | Voice scorer | 🔜 not started | `src/voice_scorer.py` planned |
-| W5 | Replay engine UI | 🔜 not started | `src/replay.py` planned |
+| W5 | Forensic analyzer + injection demo | ✅ | `src/forensic.py` (this branch) |
+| W5 | Voice scorer | ✅ | `src/voice_scorer.py` (this branch) |
+| W5 | Replay engine | ✅ | `src/replay.py` (this branch) |
+| W5 | Trust Curve auto-promotion | 🔜 not started | needs N-confirm pattern detection |
 | W5 | Absence mode | 🔜 not started | — |
 | W6 | Final demo video | 🔜 — | — |
 | W7 | Interview prep | 🔜 — | — |
 
 ## What we are honest about
 
-For the 6/12 written submission, three pitch claims do NOT yet have running code:
+For the 6/12 written submission, the three big pitch claims have running code as of
+this branch (`claude/w5-voice-scorer`):
 
-1. **Voice match 84% (Slide 7)** — `src/voice_scorer.py` not built. Current build drafts
-   in agent's voice; the 84% number is aspirational. Demo can either skip the overlay
-   or describe it as planned.
-2. **Memory Replay [Why this?] button (Slide 6)** — audit log has the data; UI on top
-   not built. Demo can show `logs/{date}.jsonl` as raw evidence.
-3. **Forensic readout (Slide 8)** — `src/forensic.py` not built. The Tier classifier
-   blocks the attack today; the per-message domain/SPF/DKIM analysis is W5. Demo can
-   show the Tier-3 refusal + audit entry as the "blocked" evidence.
+- Voice match algorithm (Slide 7) — `src/voice_scorer.py`, 10 tests, 80% cap enforced
+- Memory Replay composer (Slide 6) — `src/replay.py`, 15 tests, full report
+  including triggered L3 / similar cases / voice / forensic / counterfactual
+- Forensic analyzer (Slide 8) — `src/forensic.py`, 23 tests, typosquat + injection DB
+  + SPF/DKIM header parser
+
+What's still NOT in code:
+
+1. **Trust Curve auto-promotion (Slide 5)** — pattern detection so the agent itself
+   proposes "after N confirms, auto-with-undo?" — not yet implemented. Currently
+   every Tier-2 call still confirms every time. The 5-stage ladder is product
+   design; the W5 build is the Tier-1/2/3 three-stage gate.
+2. **Replay [Why this?] Telegram inline-button** — `replay.build_report` returns a
+   rendered text block ready to post; wiring a button on each Telegram reply to
+   call it is mechanical and lands in a follow-up.
+3. **DNS-based SPF/DKIM verification** — `forensic.analyze_auth_headers` parses
+   Authentication-Results headers but doesn't live-query DNS. Real-mailbox demo
+   uses the parsed header path; "unverified" appears when headers aren't supplied.
 
 Three honest paragraphs in the deck (one per gap) are better than fudging — reviewers
 will spot the absence in any live Q&A.
