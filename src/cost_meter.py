@@ -135,3 +135,37 @@ def current_week_window(now: datetime | None = None) -> tuple[date, date]:
     start = today - timedelta(days=today.weekday())
     end = start + timedelta(days=6)
     return start, end
+
+
+class BudgetState:
+    """Track which threshold alerts have already fired (per process).
+
+    main.py calls poll() once per turn; we filter alerts to ones not yet
+    seen in this process so the user gets one notification per crossing
+    rather than one per turn after crossing.
+    """
+
+    def __init__(self, budget_usd: float, *, logs_dir: Path | None = None):
+        self.budget_usd = budget_usd
+        self.logs_dir = logs_dir
+        self._fired: set[int] = set()
+
+    def poll(self) -> list[Alert]:
+        """Return any alerts whose threshold was crossed since the last poll."""
+        usage = usage_summary(self.logs_dir)
+        new: list[Alert] = []
+        for alert in check_thresholds(usage, self.budget_usd):
+            if alert.pct not in self._fired:
+                self._fired.add(alert.pct)
+                new.append(alert)
+        return new
+
+    @property
+    def halted(self) -> bool:
+        """120% reached — main.py should refuse new agent calls."""
+        return 120 in self._fired
+
+    @property
+    def tier2_suspended(self) -> bool:
+        """100% reached — main.py / can_use_tool should auto-deny Tier 2."""
+        return 100 in self._fired or self.halted

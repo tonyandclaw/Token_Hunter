@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from src.cost_meter import (
+    BudgetState,
     Severity,
     check_thresholds,
     current_week_window,
@@ -114,3 +115,47 @@ def test_current_week_window_monday_to_sunday():
     start, end = current_week_window(wednesday)
     assert start == date(2026, 5, 11)  # Monday
     assert end == date(2026, 5, 17)  # Sunday
+
+
+def test_budget_state_first_poll_returns_crossed_alerts(tmp_path: Path):
+    _write_event(tmp_path / "2026-05-13.jsonl", cost_usd=85.0)
+    state = BudgetState(budget_usd=100.0, logs_dir=tmp_path)
+    alerts = state.poll()
+    assert [a.pct for a in alerts] == [50, 80]
+
+
+def test_budget_state_second_poll_returns_only_new_alerts(tmp_path: Path):
+    _write_event(tmp_path / "2026-05-13.jsonl", cost_usd=85.0)
+    state = BudgetState(budget_usd=100.0, logs_dir=tmp_path)
+    state.poll()  # 50 + 80 fire
+    # Same usage, no new crossings
+    assert state.poll() == []
+    # Add more cost so we cross 100
+    _write_event(tmp_path / "2026-05-13.jsonl", cost_usd=20.0)
+    new = state.poll()
+    assert [a.pct for a in new] == [100]
+
+
+def test_budget_state_halt_property_set_after_120_pct(tmp_path: Path):
+    _write_event(tmp_path / "2026-05-13.jsonl", cost_usd=130.0)
+    state = BudgetState(budget_usd=100.0, logs_dir=tmp_path)
+    assert state.halted is False
+    state.poll()
+    assert state.halted is True
+    assert state.tier2_suspended is True
+
+
+def test_budget_state_tier2_suspended_at_100_not_120(tmp_path: Path):
+    _write_event(tmp_path / "2026-05-13.jsonl", cost_usd=105.0)
+    state = BudgetState(budget_usd=100.0, logs_dir=tmp_path)
+    state.poll()
+    assert state.tier2_suspended is True
+    assert state.halted is False
+
+
+def test_budget_state_no_alerts_below_50_pct(tmp_path: Path):
+    _write_event(tmp_path / "2026-05-13.jsonl", cost_usd=10.0)
+    state = BudgetState(budget_usd=100.0, logs_dir=tmp_path)
+    assert state.poll() == []
+    assert state.tier2_suspended is False
+    assert state.halted is False

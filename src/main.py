@@ -36,6 +36,7 @@ from telegram.ext import (
 
 from src import kill_switch, session_log
 from src.agent import reply
+from src.cost_meter import Alert, BudgetState, Severity
 from src.tier2_confirm import ConfirmRegistry
 
 load_dotenv()
@@ -58,6 +59,21 @@ ALLOWED = _allowed_user_ids()
 _SESSIONS: dict[int, str] = {}
 # Shared registry across agent task + Telegram button handler.
 _REGISTRY = ConfirmRegistry()
+# CostMeter state, lazily set in main(). None means "no budget enforcement".
+_BUDGET: BudgetState | None = None
+
+
+def _alert_emoji(sev: Severity) -> str:
+    return {
+        Severity.INFO: "💰",
+        Severity.WARNING: "⚠️",
+        Severity.URGENT: "🚨",
+        Severity.HALT: "🛑",
+    }[sev]
+
+
+def _format_alert(alert: Alert) -> str:
+    return f"{_alert_emoji(alert.severity)} {alert.message}"
 
 
 def _session_for(user_id: int) -> str:
@@ -138,6 +154,11 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await msg.reply_text(kill_switch.stop_reply())
         return
 
+    # Budget halt — at 120% we refuse new turns until the operator clears state.
+    if _BUDGET is not None and _BUDGET.halted:
+        await msg.reply_text("🛑 預算已超過 120%,agent 暫停接受新指令。請手動處理或重設預算。")
+        return
+
     session_log.append_entry(f"user[{user.id}]: {text[:120]}")
     log.info("turn from %s: %s", user.id, text[:80])
     try:
@@ -156,6 +177,12 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     session_log.append_entry(f"agent[{user.id}]: {answer[:120]}")
     await msg.reply_text(answer)
 
+    # Per-turn cost-budget alert. Only NEW threshold crossings notify, so the
+    # user gets one message per crossing, not one per turn after crossing.
+    if _BUDGET is not None:
+        for alert in _BUDGET.poll():
+            await msg.reply_text(_format_alert(alert))
+
 
 def build_app():
     token = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -170,6 +197,17 @@ def main() -> None:
     pruned = session_log.prune_old()
     if pruned:
         log.info("pruned %d old session log(s)", len(pruned))
+
+    # Cost budget — opt-in via COST_BUDGET_USD; missing/zero disables alerts.
+    global _BUDGET
+    budget_raw = os.environ.get("COST_BUDGET_USD", "0")
+    try:
+        budget = float(budget_raw)
+    except ValueError:
+        budget = 0.0
+    if budget > 0:
+        _BUDGET = BudgetState(budget)
+        log.info("cost budget enforcement enabled: %.2f USD", budget)
 
     app = build_app()
     webhook_url = os.environ["TELEGRAM_WEBHOOK_URL"]
