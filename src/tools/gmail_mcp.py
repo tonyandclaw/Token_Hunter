@@ -7,7 +7,17 @@ Four tools, all exposed via `mcp__gmail__*`:
   - `mcp__gmail__list_unread(limit)`  — Tier 1 (read)
   - `mcp__gmail__search(query, limit)` — Tier 1 (read; Gmail-style query)
   - `mcp__gmail__read(uid)`           — Tier 1 (read full body of one message)
+                                        Auto-runs forensic.analyze on the body
+                                        (sender domain + injection patterns).
+                                        Findings are prepended to the returned
+                                        text so the agent sees them BEFORE it
+                                        decides how to react — docs/02 Scene 4
+                                        "Quarantined" UX leans on this. Findings
+                                        also append to logs/forensic.jsonl for
+                                        the user to review via CLI or /status.
   - `mcp__gmail__send(to, subject, body)` — Tier 2 (external write → confirm)
+
+Called by: src/agent.py:build_options → mcp_servers["gmail"] = build_server().
 
 GmailClient is a thin facade so tests can inject a mock without touching
 imap-tools / smtplib. The SDK-side tool functions just translate args to
@@ -20,9 +30,15 @@ import os
 import smtplib
 from dataclasses import dataclass
 from email.message import EmailMessage
+from pathlib import Path
 from typing import Any, Protocol
 
-from claude_agent_sdk import create_sdk_mcp_server, tool
+from src import forensic, forensic_log
+from src.audit import sha256_short
+
+# claude_agent_sdk is imported lazily inside build_tools / build_server so
+# the pure helpers (EmailFull, run_forensic_on_read, formatters) are unit-
+# testable without the SDK installed.
 
 
 @dataclass(frozen=True)
@@ -169,12 +185,48 @@ def _format_full(m: EmailFull) -> str:
     )
 
 
+def _sender_domain(addr: str) -> str:
+    """Extract the domain from a 'Name <user@domain>' style sender string."""
+    if "<" in addr and ">" in addr:
+        addr = addr[addr.find("<") + 1 : addr.find(">")]
+    if "@" in addr:
+        return addr.split("@", 1)[-1].strip().lower()
+    return addr.strip().lower()
+
+
+def run_forensic_on_read(m: EmailFull, *, log_path: Path | None = None) -> forensic.ForensicReport:
+    """Auto-trigger forensic.analyze on a freshly-fetched email and log the finding.
+
+    Called by `read` tool below; exposed at module level so tests can drive
+    it directly without standing up an MCP server. Always logs — even info-
+    severity rows are useful for `/status` and the CLI ops tool to show
+    'last N scans'.
+    """
+    domain = _sender_domain(m.sender)
+    report = forensic.analyze(domain, m.body)
+    forensic_log.record(
+        report,
+        source="gmail__read",
+        body_hash=sha256_short(m.body),
+        path=log_path,
+        extra={"uid": m.uid, "subject_hash": sha256_short(m.subject or "")},
+    )
+    return report
+
+
+def _format_forensic_banner(report: forensic.ForensicReport) -> str:
+    """One-block banner prepended to the email body so the agent sees it first."""
+    icon = {"info": "✅", "warning": "⚠️", "block": "🚨"}.get(report.severity, "⚠️")
+    return f"{icon} Forensic auto-scan: severity={report.severity}\n{report.render()}\n\n"
+
+
 def build_tools(client_factory):
     """Build the four SDK tools, each lazily resolving its client via client_factory.
 
     client_factory is called fresh on every tool invocation. In production
     that's GmailClient.from_env; in tests it returns a stub.
     """
+    from claude_agent_sdk import tool
 
     def _client_or_error(text: str | None = None) -> tuple[GmailClientProtocol | None, dict | None]:
         try:
@@ -211,7 +263,10 @@ def build_tools(client_factory):
 
     @tool(
         "read",
-        "Read one email by IMAP uid; returns headers, body, attachment filenames.",
+        "Read one email by IMAP uid; returns headers, body, attachment filenames. "
+        "A forensic auto-scan banner is prepended automatically (sender domain "
+        "vs trusted-domain Levenshtein + injection patterns); the agent should "
+        "factor severity=warning/block into its response.",
         {"uid": str},
     )
     async def read(args: dict) -> dict:
@@ -224,7 +279,9 @@ def build_tools(client_factory):
                 "content": [{"type": "text", "text": f"No message with uid={args['uid']}"}],
                 "is_error": True,
             }
-        return {"content": [{"type": "text", "text": _format_full(msg)}]}
+        report = run_forensic_on_read(msg)
+        body = _format_forensic_banner(report) + _format_full(msg)
+        return {"content": [{"type": "text", "text": body}]}
 
     @tool(
         "send",
@@ -243,4 +300,6 @@ def build_tools(client_factory):
 
 def build_server(client_factory=GmailClient.from_env) -> Any:
     """Build the in-process MCP server. Pass a stub factory for tests."""
+    from claude_agent_sdk import create_sdk_mcp_server
+
     return create_sdk_mcp_server(name="gmail", version="0.1.0", tools=build_tools(client_factory))

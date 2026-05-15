@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel earlier in-flight runs for the same ref so a fast-follow push doesn't
+# pile up duplicate work. Both interpolations are GitHub-controlled metadata
+# (workflow name + ref) — neither is user-supplied content.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: lint + pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package + dev extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint (ruff check)
+        run: ruff check .
+
+      - name: Format check (ruff format --check)
+        run: ruff format --check .
+
+      - name: Run tests
+        env:
+          # Tests that touch env vars use these so the suite stays self-contained.
+          USER_NAME: ci-test
+          ANTHROPIC_MODEL: claude-opus-4-6-2026V2
+        run: pytest -q --tb=short -ra

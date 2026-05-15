@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -243,6 +244,77 @@ def _counterfactual(
     if triggered:
         return f"若 L3 學習 ({len(triggered)} 條) 信心度從『高』降為『低』,可能改用更保守的回應"
     return "(本決定缺乏可量化的 counterfactual)"
+
+
+def build_report_for_call(
+    tool: str,
+    args: dict[str, Any],
+    *,
+    tier: int = 2,
+    user_confirmed: bool | None = None,
+    logs_dir: Path | None = None,
+    learnings_path: Path | None = None,
+    user_corpus: str = "",
+    log_date: str | None = None,
+) -> ReplayReport:
+    """Build a ReplayReport for a CURRENT, not-yet-audited decision.
+
+    The audit-log path (`build_report(event_index)`) is for past decisions
+    that already have a JSONL row. The `[🔍 Why this?]` button on a pre- or
+    mid-execution Telegram message needs a report BEFORE the PostToolUse
+    hook writes the audit event, so we synthesize a target dict from the
+    live (tool, args, tier) tuple and run the same downstream pipeline:
+    similar-case search by tool name, L3 trigger matching, voice score on
+    the draft text, forensic on any email-shaped body, counterfactual.
+
+    Past audit events are still read for the similar-cases section — the
+    target is excluded by virtue of having a synthetic `ts` that doesn't
+    appear in the log.
+    """
+    logs_root = logs_dir or LOGS_DIR
+    learn_path = learnings_path or LEARNINGS_PATH
+
+    if log_date is not None:
+        events = _read_jsonl(logs_root / f"{log_date}.jsonl")
+    else:
+        candidates = sorted(logs_root.glob("*.jsonl"))
+        events = _read_jsonl(candidates[-1]) if candidates else []
+
+    target: dict[str, Any] = {
+        "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "tool": tool,
+        "tier": tier,
+        "input": dict(args or {}),
+        "result": "pending",
+        "user_confirmed": user_confirmed,
+        "turn": None,
+    }
+
+    similar = find_similar_cases(events, target)
+    learnings = parse_learnings(learn_path)
+    triggered = match_l3_for_event(learnings, target)
+
+    draft = _draft_text_from_args(target["input"])
+    voice: VoiceScore | None = None
+    if draft and user_corpus:
+        voice = voice_score(draft, user_corpus)
+
+    forensic: ForensicReport | None = None
+    email_shape = _email_shape_from_args(target["input"])
+    if email_shape is not None and email_shape[0]:
+        domain, body = email_shape
+        forensic = analyze_forensic(domain, body)
+
+    counterfactual = _counterfactual(target, triggered, forensic)
+
+    return ReplayReport(
+        event=target,
+        similar_cases=similar,
+        triggered_l3=triggered,
+        voice=voice,
+        forensic=forensic,
+        counterfactual=counterfactual,
+    )
 
 
 def build_report(

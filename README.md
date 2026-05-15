@@ -125,22 +125,29 @@ Agent 在這段內,在**已 trust-elevated 範圍內**自主跑。
 ## Architecture(壓縮版)
 
 ```
-[Telegram] → [Python service in WSL2]
-                  │
-                  ▼
-            [Claude Agent SDK]  ← Opus 4.6 (delegate brain)
-                  │
-        ┌─────────┴──────────┬──────────────────┐
-        ▼                    ▼                  ▼
-   [MCP Tools]      [Cross-cutting]      [自家三大元件]
-   • telegram       • PermissionGate     • ReplayEngine
-   • gmail          • AuditLogger        • VoiceScorer
-   • bluesky        • CostMeter          • ForensicAnalyzer
-   • kimi_bulk      • KillSwitch
-   • memory                              ↑ 這三個是 moat
+[Telegram] ──┐
+             ├─→ [ChatAdapter] → [Python service in WSL2]
+[MS Teams] ──┘                          │
+   (Adaptive Cards)                     ▼
+                                  [Claude Agent SDK]  ← Opus 4.6 (delegate brain)
+                                        │
+                              ┌─────────┴──────────┬──────────────────┐
+                              ▼                    ▼                  ▼
+                         [MCP Tools]      [Cross-cutting]      [自家三大元件]
+                         • gmail          • PermissionGate     • ReplayEngine
+                         • bluesky        • AuditLogger        • VoiceScorer
+                         • memory         • CostMeter          • ForensicAnalyzer
+                         • kimi_bulk      • KillSwitch
+                                          • TrustCurve         ↑ 這三個是 moat
+                                          • UndoWindow
+                                          • AbsenceMode
 ```
 
-詳見 docs/01-architecture.md。
+`CHAT_PLATFORM=telegram|teams` 環境變數決定 startup 載哪個 adapter。兩邊都實作同一個
+`ChatAdapter` 介面(send_message / edit_message / inline buttons),所有 handler
+都是平台中立的 — 加第三個平台就是再寫一個 adapter。
+
+詳見 docs/01-architecture.md 與 CLAUDE.md `Multi-platform chat layer` 章節。
 
 ## 競賽對齊
 
@@ -157,36 +164,60 @@ Agent 在這段內,在**已 trust-elevated 範圍內**自主跑。
 /agent-project/
 ├── README.md                       ← 你在看的
 ├── CLAUDE.md                       ← Claude Code dev guidance
-├── docs/
-│   ├── 00-agent-identity.md        ← runtime agent constitution
-│   ├── 01-architecture.md
-│   ├── 02-demo-script.md
-│   ├── 03-scenarios.md
-│   ├── 04-security-design.md
-│   ├── 05-cost-and-roadmap.md
-│   └── 06-pitch-outline.md
+├── docs/00..08.md                  ← design / demo / security / roadmap / build status
 ├── pyproject.toml
+├── .github/workflows/              ← CI (ruff + pytest, py3.11/3.12) + weekly pip-audit
 ├── src/
-│   ├── main.py                     ← Telegram entry
-│   ├── agent.py                    ← Agent SDK orchestration
-│   ├── permissions.py              ← Trust curve + tier gate
+│   ├── main.py                     ← Thin dispatcher; picks adapter from CHAT_PLATFORM env
+│   ├── agent.py                    ← Agent SDK orchestration; agent_helpers.py 是 testable 抽取
+│   ├── permissions.py              ← Tier 1/2/3 classifier
+│   ├── trust_curve.py              ← 5-level Trust Curve + persistence
+│   ├── escalation.py               ← propose-escalation 3-button UX
+│   ├── undo_window.py              ← 15s undo for AUTO_AUDITED+ patterns
+│   ├── absence_mode.py             ← 時間窗 + structured replay log
+│   ├── absence_feedback.py         ← 每筆 auto_executed 的 ✅/🚫 feedback bubble
+│   ├── why_button.py               ← [🔍 Why this?] decision snapshot registry
 │   ├── replay.py                   ← Memory Replay engine ⭐ 自家
-│   ├── voice_scorer.py             ← Voice match algo ⭐ 自家
+│   ├── voice_scorer.py             ← Voice match algo ⭐ 自家 (80% 上限)
+│   ├── voice_corpus.py             ← 從 L2 + L4 build 使用者語料
 │   ├── forensic.py                 ← Attack analyzer ⭐ 自家
-│   ├── cost_meter.py
-│   └── tools/
-│       ├── kimi_bulk.py
-│       ├── gmail_mcp.py
-│       └── bluesky_mcp.py
-├── memories/
-│   ├── user-profile.md
-│   ├── learnings.md
-│   └── sessions/YYYY-MM-DD.md
-├── trust/
-│   └── curves.json                 ← Trust Dashboard state
-└── logs/
-    └── YYYY-MM-DD.jsonl
+│   ├── forensic_log.py             ← logs/forensic.jsonl (append-only)
+│   ├── memory_inspect.py           ← /profile + /learnings 的 read-only render
+│   ├── memory_writes.py            ← L2/L3 append + 信心度降級
+│   ├── session_log.py              ← L4 (memories/sessions/{date}.md)
+│   ├── audit.py                    ← logs/{date}.jsonl + turn_summary 寫入
+│   ├── cost_meter.py               ← 50/80/100/120% threshold alerts + 定價
+│   ├── kill_switch.py              ← STOP / 緊急停止 / KILL.flag
+│   ├── cli.py                      ← `python -m src.cli ...` 離線 ops 工具
+│   ├── chat/                       ← 多平台 chat adapter 層
+│   │   ├── base.py                 ←   ChatAdapter ABC + Button/Keyboard 中立型別
+│   │   ├── telegram.py             ←   TelegramAdapter (python-telegram-bot)
+│   │   ├── teams.py                ←   TeamsAdapter (Bot Framework v3 HTTP + Adaptive Cards)
+│   │   └── teams_auth.py           ←   Bot Framework JWT 驗證 (PyJWT + JWKS cache)
+│   └── tools/                      ← MCP servers (lazy claude_agent_sdk import)
+│       ├── gmail_mcp.py            ←   read 會自動跑 forensic.analyze
+│       ├── bluesky_mcp.py          ←   每筆 timeline 貼文也跑 forensic
+│       ├── memory_mcp.py           ←   write_user_profile / write_learning
+│       └── kimi_bulk.py            ←   bulk_generate MCP tool + should_offload 路由
+├── tests/                          ← 1:1 with src/; 339 SDK-independent tests
+├── memories/                       ← L2/L3/L4 (gitignored,只有 .example.md 進 git)
+├── trust/                          ← curves.json + teams_conversations.json
+└── logs/                           ← audit JSONL + forensic JSONL
 ```
+
+## 平台支援(Platform support)
+
+副手原本是 Telegram-only,現在透過 `ChatAdapter` 抽象支援:
+
+| Platform | 啟動方式 | UX 表現 | 雙向驗證 |
+| :-: | :-: | :-: | :-: |
+| Telegram | `CHAT_PLATFORM=telegram`(預設) | InlineKeyboardMarkup buttons | `secret_token` header |
+| Microsoft Teams | `CHAT_PLATFORM=teams` | Adaptive Cards v1.4 + Action.Submit | Bot Framework JWT(PyJWT + JWKS) |
+
+Teams 部署需要先在 Azure 註冊 Bot resource、加 Teams channel、設 messaging endpoint 為
+`https://<host>/api/messages`,並讓使用者先 DM bot 一次以捕獲 ConversationReference
+(Teams 不允許 bot 主動 DM 陌生人)。完整 7 步 setup checklist 見 `.env.example` 與
+CLAUDE.md `Azure setup checklist` 段落。
 
 ## 狀態
 

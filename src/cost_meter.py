@@ -9,11 +9,16 @@ Per docs/00 §異質模型成本紀律 and docs/05:
 This module is the pure tally + threshold engine. It reads audit-log files
 written by `src/audit.py` and surfaces alerts; main.py decides what to do
 about them (notify user, suspend Tier 2, etc.).
+
+Pricing helpers `price_for_model` and `estimate_cost` convert raw token
+counts to USD using the published list prices. Called by `agent.reply` when
+it emits a turn_summary audit event after each query completes.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from enum import Enum
@@ -23,6 +28,87 @@ LOGS_DIR = Path(__file__).resolve().parent.parent / "logs"
 
 # 50 / 80 / 100 / 120% thresholds per docs/04
 THRESHOLDS_PCT: tuple[int, ...] = (50, 80, 100, 120)
+
+# USD per 1M tokens.
+#
+# ⚠️  REVIEW BEFORE PRODUCTION USE  ⚠️
+# These defaults are best-guess placeholders. Verify against the live pricing
+# page before relying on budget alerts in production:
+#   https://www.anthropic.com/pricing (Opus)
+#   https://platform.moonshot.cn/  (Kimi K2.5 — pricing in CNY, convert)
+#   https://openai.com/pricing (GPT)
+#
+# If your numbers differ, override at runtime via env vars rather than editing
+# this file (so a price change doesn't need a code commit):
+#   OPUS_INPUT_USD_PER_MTOK / OPUS_OUTPUT_USD_PER_MTOK
+#   KIMI_INPUT_USD_PER_MTOK / KIMI_OUTPUT_USD_PER_MTOK
+#   GPT_INPUT_USD_PER_MTOK  / GPT_OUTPUT_USD_PER_MTOK
+#
+# The dict shape is part of the schema contract — tests pin shape, not numbers,
+# so price moves don't churn the suite. Module-level constants are evaluated
+# at import; if you change env after import, call `reload_prices()`.
+_DEFAULT_PRICES: dict[str, dict[str, float]] = {
+    "opus": {"input": 15.00, "output": 75.00},
+    "kimi": {"input": 0.60, "output": 2.50},
+    "gpt": {"input": 5.00, "output": 15.00},
+}
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a float from env; fall back to default on missing / unparseable."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _load_prices() -> dict[str, dict[str, float]]:
+    """Build the price table, honouring env-var overrides per model.field."""
+    return {
+        model: {
+            "input": _env_float(f"{model.upper()}_INPUT_USD_PER_MTOK", defaults["input"]),
+            "output": _env_float(f"{model.upper()}_OUTPUT_USD_PER_MTOK", defaults["output"]),
+        }
+        for model, defaults in _DEFAULT_PRICES.items()
+    }
+
+
+PRICES_USD_PER_MTOK: dict[str, dict[str, float]] = _load_prices()
+
+
+def reload_prices() -> None:
+    """Re-read env vars and update PRICES_USD_PER_MTOK in place.
+
+    Useful if ops sets env vars after import (e.g. via a hot-config reload).
+    The module-level dict is mutated, not replaced, so existing references
+    stay valid.
+    """
+    fresh = _load_prices()
+    PRICES_USD_PER_MTOK.clear()
+    PRICES_USD_PER_MTOK.update(fresh)
+
+
+def price_for_model(model: str) -> dict[str, float]:
+    """Return {'input': X, 'output': Y} USD-per-Mtok for `model` (opus / kimi / gpt)."""
+    return PRICES_USD_PER_MTOK[model]
+
+
+def estimate_cost(
+    *,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+) -> float:
+    """Pure-Python USD estimate. Used by audit-event emitters at the call site."""
+    rates = PRICES_USD_PER_MTOK.get(model)
+    if rates is None:
+        return 0.0
+    in_cost = (max(0, input_tokens) / 1_000_000) * rates["input"]
+    out_cost = (max(0, output_tokens) / 1_000_000) * rates["output"]
+    return in_cost + out_cost
 
 
 class Severity(Enum):
