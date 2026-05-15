@@ -1,0 +1,68 @@
+# Keep the build context small + prevent secrets from sneaking into the image.
+
+# VCS
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+.eggs/
+build/
+dist/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Virtualenv — never bake the host venv into the image
+.venv/
+venv/
+env/
+ENV/
+
+# Secrets / config — .env MUST NOT enter the image. Operators mount or
+# `--env-file` it at runtime.
+.env
+.env.*
+*.pem
+*.key
+
+# Runtime state — same reason as in .gitignore: never bake individual-user
+# data into a redistributable image.
+memories/user-profile.md
+memories/learnings.md
+memories/sessions/
+trust/curves.json
+trust/teams_conversations.json
+trust/sdk_sessions.json
+logs/
+KILL.flag
+
+# Tests + CI — runtime image doesn't need them
+tests/
+.github/
+
+# Docs that aren't loaded at runtime (docs/00-agent-identity.md IS loaded —
+# the COPY in the Dockerfile pulls the whole docs/ tree; we just exclude
+# pitch outline / build status / etc. via this pattern only if Docker
+# supported negative globs, which it doesn't. So we keep all of docs/.)
+# (intentionally leave docs/ included; the agent needs docs/00-agent-identity.md)
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Claude Code local scratch — never leak into images
+.claude/

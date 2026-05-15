@@ -5,13 +5,22 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fushou"
 version = "0.1.0"
-description = "副手 (Fushou) — single-user Telegram-based AI delegate. ASUS Agentic AI 2026."
+description = "副手 (Fushou) — single-user AI delegate over Telegram or Microsoft Teams. ASUS Agentic AI 2026."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = [
     "claude-agent-sdk>=0.1.81",
+    # Chat platforms — both adapters live in src/chat/ and are switched at
+    # startup by CHAT_PLATFORM env. Both deps are kept lightweight; Teams
+    # uses the Bot Framework REST API directly via httpx, no botbuilder.
     "python-telegram-bot[webhooks]>=21.0",
+    "aiohttp>=3.9",
+    # JWT verification for inbound Teams webhooks. `[crypto]` pulls in the
+    # `cryptography` package for RS256 support (the algorithm Bot Framework
+    # uses). PyJWT is the de-facto Python JWT lib; we use its standard
+    # validators rather than rolling our own crypto.
+    "pyjwt[crypto]>=2.8",
     "anthropic>=0.40.0",
     "httpx>=0.27.0",
     "python-dotenv>=1.0.0",

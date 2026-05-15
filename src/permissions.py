@@ -29,8 +29,23 @@ TIER1_PREFIXES: tuple[str, ...] = (
     "mcp__bluesky__search",
     "mcp__calendar__read",
     "mcp__memory__read",
+    # Kimi is the agent's bulk-drafting helper — data flows to the Kimi
+    # endpoint, but the resulting draft still goes through Tier 2 before
+    # any external write, so this stays Tier 1 (same as Opus itself receiving
+    # the user's data).
+    "mcp__kimi__",
     "WebSearch",
     "WebFetch",
+    # `Read` is the SDK's built-in file reader. We allow it specifically
+    # so subagents (voice-drafter / forensic-analyzer) can read memories/*.md.
+    # The agent could in principle read any path, but `setting_sources=[]`
+    # + the workdir being the deploy root limit blast radius to the repo.
+    "Read",
+    "Glob",
+    "Grep",
+    # `Agent` is the SDK's subagent-delegation tool. Calling a subagent is
+    # not an external write; it's an internal context-isolation move. Tier 1.
+    "Agent",
 )
 
 # Tool-name patterns that are always Tier 2 (external writes, memory writes)
@@ -43,15 +58,20 @@ TIER2_PREFIXES: tuple[str, ...] = (
     "mcp__bluesky__comment",
     "mcp__memory__write_user_profile",
     "mcp__memory__write_learning",
-    "mcp__install",
 )
 
-# Substrings that, if found anywhere in the tool name, force Tier 3
+# Substrings that, if found anywhere in the tool name, force Tier 3.
+# `install` here covers `mcp__install_*` for installing new MCP servers —
+# docs/04 §A "Don't Trust Supply Chain" and CLAUDE.md require Tier-3 refusal
+# even if the user asks. Adding non-Composio/non-Anthropic MCP servers at
+# runtime would let the agent acquire new capabilities outside the audited
+# tool surface.
 TIER3_FORBIDDEN_SUBSTRINGS: tuple[str, ...] = (
     "modify_constitution",
     "modify_tier",
     "exfil",
     "write_api_key",
+    "mcp__install",
 )
 
 # Tier 3 forbidden tool-arg patterns: caller passes args dict; we check fields
@@ -70,6 +90,47 @@ API_KEY_SHAPES: tuple[str, ...] = (
 REFUSAL_TEMPLATE = (
     "⛔ 這是 Tier 3 禁止動作:{reason}\n\n我不能執行,即使你授權。\n\n如果你真的需要,請手動操作。"
 )
+
+# Substrings that, if found in a Read/Glob path or pattern, force Tier 3.
+# The SDK's built-in Read/Glob tools have no path scoping by default, so
+# without this check the agent (or a compromised subagent) could exfil
+# credentials by Read('.env') / Read('~/.ssh/id_rsa') / Glob('**/*.key').
+# Substring match is case-insensitive — we lowercase the arg before comparing.
+SENSITIVE_PATH_SUBSTRINGS: tuple[str, ...] = (
+    ".env",
+    ".ssh",
+    "/etc/ssh",  # OpenSSH server keys (the user-home variant uses .ssh)
+    "id_rsa",
+    "id_ed25519",
+    "id_ecdsa",
+    "id_dsa",
+    "/secrets/",
+    "/private/",
+    "/credentials",
+    ".aws/credentials",
+    ".docker/config",
+    "/etc/shadow",
+    "/etc/passwd",
+    "/etc/sudoers",
+    # Our own runtime state — agent has no business reading these directly.
+    # Legitimate access to memory goes through `memories/*.md` (allowed),
+    # not the trust/ or logs/ directories.
+    "trust/curves.json",
+    "trust/sdk_sessions.json",
+    "trust/teams_conversations.json",
+    "kill.flag",
+)
+
+
+def _path_is_sensitive(raw_path: str) -> str | None:
+    """Return the matched sensitive substring, or None if path is clean."""
+    if not raw_path:
+        return None
+    lowered = raw_path.lower()
+    for needle in SENSITIVE_PATH_SUBSTRINGS:
+        if needle in lowered:
+            return needle
+    return None
 
 
 @dataclass(frozen=True)
@@ -95,6 +156,24 @@ def classify(
     for substring in TIER3_FORBIDDEN_SUBSTRINGS:
         if substring in tool_name:
             return TierDecision(Tier.REFUSE, f"tool name matches forbidden pattern '{substring}'")
+
+    # Tier 3 — sensitive-path scoping on Read / Glob. The SDK's built-in
+    # readers have no path scoping; without this check the agent (or a
+    # compromised subagent) could `Read('.env')` to exfil API keys, or
+    # `Glob('**/*.key')` to enumerate SSH/TLS keys.
+    if tool_name in {"Read", "Glob"}:
+        # Read uses `file_path`; Glob uses `pattern` (+ optional `path` root).
+        candidates = (
+            str(args.get("file_path") or ""),
+            str(args.get("pattern") or ""),
+            str(args.get("path") or ""),
+        )
+        for cand in candidates:
+            if (hit := _path_is_sensitive(cand)) is not None:
+                return TierDecision(
+                    Tier.REFUSE,
+                    f"{tool_name} path matches sensitive pattern '{hit}'",
+                )
 
     if tool_name.endswith("bulk_delete"):
         count = int(args.get("count", 0))

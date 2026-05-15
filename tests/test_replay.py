@@ -5,6 +5,7 @@ from pathlib import Path
 
 from src.replay import (
     build_report,
+    build_report_for_call,
     find_similar_cases,
     match_l3_for_event,
     parse_learnings,
@@ -205,3 +206,101 @@ def test_report_render_contains_decision_block(tmp_path: Path):
 
 def test_build_report_no_logs_returns_none(tmp_path: Path):
     assert build_report(0, logs_dir=tmp_path) is None
+
+
+# --- build_report_for_call ---
+
+
+def test_build_report_for_call_basic(tmp_path: Path):
+    """No logs, no learnings → still returns a report with a synthesized event."""
+    report = build_report_for_call(
+        "mcp__gmail__send",
+        {"to": "alice@acme.com", "body": "test"},
+        tier=2,
+        logs_dir=tmp_path,
+        learnings_path=tmp_path / "learnings.md",
+    )
+    assert report.event["tool"] == "mcp__gmail__send"
+    assert report.event["tier"] == 2
+    assert report.event["result"] == "pending"
+    assert report.event["input"]["to"] == "alice@acme.com"
+    assert report.similar_cases == ()  # no prior logs
+    assert report.triggered_l3 == ()  # no learnings file
+
+
+def test_build_report_for_call_finds_similar_in_log(tmp_path: Path):
+    """Past events with the same tool name show up as similar cases."""
+    log = _write_log(
+        tmp_path,
+        "2026-05-13",
+        [
+            _ev("mcp__gmail__send", tier=2, inp={"to": "alice@acme.com"}),
+            _ev("mcp__gmail__send", tier=2, inp={"to": "alice@acme.com"}),
+            _ev("mcp__bluesky__post", tier=2, inp={"text": "x"}),
+        ],
+    )
+    assert log.exists()
+    report = build_report_for_call(
+        "mcp__gmail__send",
+        {"to": "alice@acme.com"},
+        tier=2,
+        logs_dir=tmp_path,
+        learnings_path=tmp_path / "learnings.md",
+        log_date="2026-05-13",
+    )
+    assert len(report.similar_cases) == 2
+    assert all(c["tool"] == "mcp__gmail__send" for c in report.similar_cases)
+
+
+def test_build_report_for_call_matches_l3(tmp_path: Path):
+    """When tool args contain an L3 category keyword, it shows up in triggered_l3."""
+    learnings = tmp_path / "learnings.md"
+    learnings.write_text(
+        "## [ACME] - 2026-05-13\n\n"
+        "**觀察**:幾次回覆都用「週五交付」\n\n"
+        "**推論規則**:ACME 詢問交期 → 回「週五」\n\n"
+        "**信心度**:高(觀察 7 次)\n\n"
+        "**反例**:(無)\n",
+        encoding="utf-8",
+    )
+    report = build_report_for_call(
+        "mcp__gmail__send",
+        {"to": "ops@ACME.com", "body": "週五交付"},
+        tier=2,
+        logs_dir=tmp_path,
+        learnings_path=learnings,
+    )
+    assert len(report.triggered_l3) == 1
+    assert report.triggered_l3[0].category == "ACME"
+
+
+def test_build_report_for_call_renders_telegram_ready(tmp_path: Path):
+    """The .render() output is what the Telegram callback sends back."""
+    report = build_report_for_call(
+        "mcp__gmail__send",
+        {"to": "alice@acme.com", "body": "test"},
+        tier=2,
+        logs_dir=tmp_path,
+        learnings_path=tmp_path / "learnings.md",
+    )
+    text = report.render()
+    assert "Memory Replay" in text
+    assert "mcp__gmail__send" in text
+    assert "Counterfactual" in text
+
+
+def test_build_report_for_call_does_not_include_self_in_similar(tmp_path: Path):
+    """The synthesized target has a fresh ts so it can't match prior log events."""
+    _write_log(
+        tmp_path,
+        "2026-05-13",
+        [_ev("mcp__gmail__send", tier=2, inp={"to": "a@b"})],
+    )
+    report = build_report_for_call(
+        "mcp__gmail__send",
+        {"to": "a@b"},
+        logs_dir=tmp_path,
+        learnings_path=tmp_path / "learnings.md",
+        log_date="2026-05-13",
+    )
+    assert len(report.similar_cases) == 1  # the one prior call, NOT a self-match

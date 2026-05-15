@@ -80,3 +80,102 @@ def test_sha256_short_is_deterministic_and_16_hex():
     assert a == b
     assert len(a) == 16
     assert all(c in "0123456789abcdef" for c in a)
+
+
+def test_sha256_short_distinguishes_different_inputs():
+    assert sha256_short("a") != sha256_short("b")
+
+
+def test_sha256_short_handles_unicode():
+    """CJK input must hash to 16 hex chars without raising."""
+    out = sha256_short("週五交付,沒問題。")
+    assert len(out) == 16
+
+
+def test_audit_event_to_jsonl_rounds_floats():
+    """cost_usd rounding pinned at 6 decimal places (docs/04 §E)."""
+    ev = AuditEvent(
+        session_id="s",
+        turn=1,
+        event_type="tool_call",
+        tool="x",
+        tier=1,
+        user_confirmed=None,
+        confirmation_message_id=None,
+        input={},
+        result="ok",
+        tokens=TokenUsage(),
+        cost_usd=0.123456789,  # 9 digits
+    )
+    payload = json.loads(ev.to_jsonl())
+    # Stringified value should have at most 6 decimal places
+    assert payload["cost_usd"] == 0.123457
+
+
+def test_audit_event_ts_is_iso8601_utc():
+    ev = AuditEvent(
+        session_id="s",
+        turn=1,
+        event_type="tool_call",
+        tool="x",
+        tier=1,
+        user_confirmed=None,
+        confirmation_message_id=None,
+        input={},
+        result="ok",
+        tokens=TokenUsage(),
+        cost_usd=0.0,
+    )
+    payload = json.loads(ev.to_jsonl())
+    # Format: YYYY-MM-DDTHH:MM:SSZ
+    assert payload["ts"].endswith("Z")
+    assert "T" in payload["ts"]
+    assert len(payload["ts"]) == 20
+
+
+def test_log_turn_summary_writes_correct_event_type(tmp_path: Path):
+    """The new summary row is event_type='turn_summary', NOT 'tool_call'."""
+    logger = AuditLogger(tmp_path / "logs")
+    logger.log_turn_summary(
+        session_id="abc",
+        turn=0,
+        tokens=TokenUsage(opus=100),
+        cost_usd=0.05,
+    )
+    line = next((tmp_path / "logs").glob("*.jsonl")).read_text(encoding="utf-8").strip()
+    payload = json.loads(line)
+    assert payload["event_type"] == "turn_summary"
+    assert payload["session_id"] == "abc"
+    assert payload["tokens"]["opus"] == 100
+    assert payload["tool"] == ""
+    assert payload["tier"] == 0
+
+
+def test_audit_logger_creates_log_dir(tmp_path: Path):
+    """logs_dir is created lazily — first .log() should mkdir -p."""
+    log_dir = tmp_path / "nested" / "logs"
+    assert not log_dir.exists()
+    logger = AuditLogger(log_dir)
+    # AuditLogger.__init__ also calls mkdir(parents=True, exist_ok=True)
+    assert log_dir.exists()
+    logger.log(_sample_event())
+    assert any(log_dir.glob("*.jsonl"))
+
+
+def test_jsonl_payload_preserves_chinese_chars(tmp_path: Path):
+    """ensure_ascii=False in to_jsonl — Chinese should be readable in the log."""
+    ev = AuditEvent(
+        session_id="s",
+        turn=1,
+        event_type="tool_call",
+        tool="mcp__memory__write_learning",
+        tier=2,
+        user_confirmed=True,
+        confirmation_message_id=None,
+        input={"category": "ACME 交期"},
+        result="ok",
+        tokens=TokenUsage(),
+        cost_usd=0.0,
+    )
+    line = ev.to_jsonl()
+    assert "ACME 交期" in line

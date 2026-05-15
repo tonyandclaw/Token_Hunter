@@ -1,7 +1,7 @@
 """Bluesky MCP server — atproto SDK wrapped as four MCP tools.
 
-  mcp__bluesky__timeline(limit)            Tier 1 (read)
-  mcp__bluesky__search(query, limit)       Tier 1 (read)
+  mcp__bluesky__timeline(limit)            Tier 1 (read; auto-forensic per post)
+  mcp__bluesky__search(query, limit)       Tier 1 (read; auto-forensic per post)
   mcp__bluesky__post(text)                 Tier 2 → Telegram inline-confirm
   mcp__bluesky__reply(parent_uri, parent_cid, text)   Tier 2
 
@@ -9,6 +9,14 @@ Same shape as src/tools/gmail_mcp.py: BlueskyClient is the production
 implementation (atproto.Client), BlueskyClientProtocol lets tests inject a
 stub, build_tools(client_factory) closure-captures the factory so tests
 can swap implementations without touching atproto.
+
+Forensic auto-scan parallels gmail_mcp's: every fetched post runs through
+`scan_post_for_injection` which calls forensic.analyze on (author_handle,
+text). Warning+ findings append to logs/forensic.jsonl with source
+"bluesky__feed"; info-level findings are skipped to keep the log compact
+(timelines may return many posts).
+
+Called by: src/agent.py:build_options → mcp_servers["bluesky"] = build_server().
 """
 
 from __future__ import annotations
@@ -17,7 +25,13 @@ import os
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from claude_agent_sdk import create_sdk_mcp_server, tool
+from src import forensic, forensic_log
+from src.audit import sha256_short
+
+# claude_agent_sdk is imported lazily inside build_tools / build_server.
+# Keeping it out of module scope means the pure helpers (Post,
+# scan_post_for_injection, _format_posts) are unit-testable without the
+# SDK installed.
 
 
 @dataclass(frozen=True)
@@ -112,18 +126,64 @@ class BlueskyClient:
         )
 
 
+def _author_domain(handle: str) -> str:
+    """Bluesky handles look like `alice.bsky.social` or `acme.com` — strip @."""
+    h = handle.lstrip("@").strip().lower()
+    return h
+
+
+def scan_post_for_injection(post: Post) -> forensic.ForensicReport:
+    """Run forensic.analyze on a single Bluesky post; record warning+ findings.
+
+    Posts are public and untrusted, just like incoming email bodies. We scan
+    the text body against the injection-pattern DB. Domain Levenshtein vs
+    the trusted list is run on the author handle (so `asus.com` would match
+    the trusted entry, `asu5.com` would not). Findings of severity warning+
+    are appended to logs/forensic.jsonl so /status and the CLI can surface
+    them; info-level scans are skipped to keep the log compact (the timeline
+    scans potentially many posts).
+
+    Called by: build_tools().timeline and build_tools().search below, on
+    every fetched post.
+    """
+    report = forensic.analyze(_author_domain(post.author), post.text)
+    if report.severity != "info":
+        forensic_log.record(
+            report,
+            source="bluesky__feed",
+            body_hash=sha256_short(post.text),
+            extra={"uri": post.uri, "author": post.author},
+        )
+    return report
+
+
 def _format_posts(posts: list[Post]) -> str:
     if not posts:
         return "(沒有符合條件的貼文)"
     lines = []
+    warnings: list[str] = []
     for p in posts:
-        lines.append(f"- @{p.author} | {p.created_at}")
+        report = scan_post_for_injection(p)
+        icon = ""
+        if report.severity == "warning":
+            icon = " ⚠️"
+        elif report.severity == "block":
+            icon = " 🚨"
+            warnings.append(f"@{p.author}: {','.join(report.injection_hits) or 'typosquat'}")
+        lines.append(f"- @{p.author}{icon} | {p.created_at}")
         lines.append(f"  {p.text.strip()[:280]}")
         lines.append(f"  uri: {p.uri}  cid: {p.cid}")
+    if warnings:
+        lines.append("")
+        lines.append("🚨 Forensic 警示 (block 等級):")
+        for w in warnings:
+            lines.append(f"  • {w}")
     return "\n".join(lines)
 
 
 def build_tools(client_factory):
+    from claude_agent_sdk import tool
+
     def _client_or_error() -> tuple[BlueskyClientProtocol | None, dict | None]:
         try:
             return client_factory(), None
@@ -202,4 +262,6 @@ def build_tools(client_factory):
 
 
 def build_server(client_factory=BlueskyClient.from_env) -> Any:
+    from claude_agent_sdk import create_sdk_mcp_server
+
     return create_sdk_mcp_server(name="bluesky", version="0.1.0", tools=build_tools(client_factory))

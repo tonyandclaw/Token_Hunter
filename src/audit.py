@@ -1,8 +1,9 @@
 """AuditLogger — append one event per line to logs/{YYYY-MM-DD}.jsonl.
 
 Schema from docs/04-security-design.md §E. The raw email body / post text MUST
-NEVER hit this file: `make_event()` requires pre-hashed identifiers. The raw
-copy goes to `logs/private/` encrypted (out of scope for this module).
+NEVER hit this file: callers hash via `agent_helpers.hash_input` before
+constructing the AuditEvent. Hash-and-discard is the deliberate posture —
+raw text is GC'd after hashing, NOT stored anywhere else.
 
 Don't change the schema without coordinating with docs/06 Slide 11.
 """
@@ -84,7 +85,41 @@ class AuditLogger:
 
     def log(self, event: AuditEvent) -> Path:
         path = self._today_path()
+        # Single write of the complete `line + "\n"` so POSIX O_APPEND can
+        # guarantee atomicity across concurrent writers (kernel-level for
+        # writes <= PIPE_BUF, ~4KB). Splitting into two fh.write() calls
+        # would let another process's write interleave between them.
+        line = event.to_jsonl() + "\n"
         with path.open("a", encoding="utf-8") as fh:
-            fh.write(event.to_jsonl())
-            fh.write("\n")
+            fh.write(line)
         return path
+
+    def log_turn_summary(
+        self,
+        *,
+        session_id: str,
+        turn: int,
+        tokens: TokenUsage,
+        cost_usd: float,
+    ) -> Path:
+        """Emit a 'turn_summary' row at end-of-query so cost_meter sees real numbers.
+
+        Called by: src/agent.py:reply after the async query loop completes.
+        The tool/tier fields are blank since this row represents the whole
+        agent turn, not a specific tool call.
+        """
+        return self.log(
+            AuditEvent(
+                session_id=session_id,
+                turn=turn,
+                event_type="turn_summary",
+                tool="",
+                tier=0,
+                user_confirmed=None,
+                confirmation_message_id=None,
+                input={},
+                result="ok",
+                tokens=tokens,
+                cost_usd=cost_usd,
+            )
+        )

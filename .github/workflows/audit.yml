@@ -1,0 +1,31 @@
+name: pip-audit
+
+# Weekly supply-chain check per docs/04 §B. Runs Monday 03:00 UTC and on demand.
+# No user-controlled inputs are interpolated into run: steps; pip-audit reads
+# only the lock graph derived from pyproject.toml.
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package + dev extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: pip-audit
+        run: pip-audit

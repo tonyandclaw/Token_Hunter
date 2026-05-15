@@ -84,3 +84,53 @@ def test_user_avg_uses_message_separators():
     matching = score("一句。兩句。", user_two_messages)
     mismatching = score("只有一句話。", user_two_messages)
     assert matching.structure_pct > mismatching.structure_pct
+
+
+def test_score_handles_only_whitespace_candidate():
+    """A candidate with only whitespace/punctuation should be 0% — no real content."""
+    s = score("   ", "real user writing here.")
+    assert s.overall_pct == 0
+
+
+def test_score_handles_only_whitespace_corpus():
+    """A whitespace-only corpus has no sentences to compare against."""
+    s = score("real text", "    \n  \n")
+    assert s.overall_pct == 0
+
+
+def test_score_handles_ascii_only_text():
+    """Pure English with no CJK chars still produces meaningful vocab overlap."""
+    user = "Ship it on Friday. Thanks."
+    candidate = "Ship it Friday. Thanks!"
+    s = score(candidate, user)
+    assert s.vocab_pct > 50
+
+
+def test_score_with_unicode_punctuation():
+    """Full-width punctuation (。!?) should still split sentences correctly."""
+    user = "好的!週五交付。沒問題?"
+    candidate = "好的!週五交付。"
+    s = score(candidate, user)
+    # 2-sentence candidate vs 3-sentence corpus, similar tokens → > 0
+    assert s.overall_pct > 0
+
+
+def test_explain_includes_corpus_and_candidate_sentence_counts():
+    s = score("一句。", "句一。句二。句三。")
+    text = s.explain()
+    # The notes field should mention how many sentences each side has
+    assert "sent" in text or "句" in text
+
+
+def test_score_caps_overall_even_when_components_all_at_100():
+    """Sanity: cap is enforced AFTER averaging components."""
+    s = score("hello", "hello")
+    # Even with all metrics at 100%, overall should not exceed MAX_VOICE_PCT
+    assert s.overall_pct <= MAX_VOICE_PCT
+
+
+def test_score_handles_single_char_input():
+    """Single-character candidate or corpus should not crash."""
+    s = score("a", "a")
+    assert s.overall_pct >= 0
+    # No exceptions raised, integer result returned

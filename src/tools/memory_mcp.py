@@ -17,16 +17,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from claude_agent_sdk import create_sdk_mcp_server, tool
-
 from src.memory_writes import (
     ALLOWED_CONFIDENCES,
     append_learning,
     append_user_profile,
 )
 
+# claude_agent_sdk imports are lazy (inside build_tools / build_server) so
+# the pure memory_writes logic stays unit-testable without the SDK.
+
 
 def build_tools() -> list[Any]:
+    from claude_agent_sdk import tool
+
     @tool(
         "write_user_profile",
         "Append an explicit user-stated fact to memories/user-profile.md (L2). "
@@ -109,4 +112,6 @@ def build_tools() -> list[Any]:
 
 
 def build_server() -> Any:
+    from claude_agent_sdk import create_sdk_mcp_server
+
     return create_sdk_mcp_server(name="memory", version="0.1.0", tools=build_tools())

@@ -33,6 +33,8 @@ memories/user-profile.md
 memories/learnings.md
 memories/sessions/
 trust/curves.json
+trust/sdk_sessions.json
+trust/teams_conversations.json
 logs/
 KILL.flag
 
