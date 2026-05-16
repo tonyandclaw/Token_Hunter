@@ -32,6 +32,33 @@ def test_render_prompt_unknown_fields_falls_back():
     assert "(無草稿內容)" in msg
 
 
+def test_render_prompt_includes_voice_match_when_corpus_provided():
+    msg = render_prompt(
+        "mcp__gmail__send",
+        {"to": "alice@a.com", "body": "週五交付沒問題。明天確認規格。"},
+        user_corpus="週五交付沒問題。明天對規格。後天上線。",
+    )
+    assert "voice match:" in msg
+    assert "cap 80%" in msg
+
+
+def test_render_prompt_skips_voice_match_when_no_corpus():
+    msg = render_prompt(
+        "mcp__gmail__send",
+        {"to": "alice@a.com", "body": "anything"},
+    )
+    assert "voice match" not in msg
+
+
+def test_render_prompt_skips_voice_match_when_no_draft_text():
+    msg = render_prompt(
+        "mcp__gmail__bulk_delete",
+        {"count": 5},
+        user_corpus="x x x",
+    )
+    assert "voice match" not in msg
+
+
 async def test_submit_then_resolve_resolves_future():
     reg = ConfirmRegistry()
     cid, future = reg.submit("mcp__gmail__send", {"to": "a@b"})

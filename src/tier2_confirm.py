@@ -36,6 +36,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from src.voice_scorer import score as voice_score
+
 DEFAULT_CONFIRM_TIMEOUT = 300  # 5 minutes, per docs/01 §PermissionGate
 
 OnSubmit = Callable[[str, str], Awaitable[None]]
@@ -52,11 +54,20 @@ class PendingConfirm:
     future: asyncio.Future[bool] = field(repr=False)
 
 
-def render_prompt(tool_name: str, tool_input: dict[str, Any]) -> str:
+def render_prompt(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    *,
+    user_corpus: str = "",
+) -> str:
     """Render the user-facing Tier-2 confirm message.
 
     The format is fixed (docs/00 §Tier 2): 動作 → 影響 → 草稿 → 確認?
     Best-effort field extraction; unknown tools still get a sensible prompt.
+
+    If `user_corpus` is non-empty AND the draft is text, a voice-match line is
+    appended so the user can spot drafts that don't sound like them. The
+    voice scorer caps at 80% by design (uncanny-valley guard).
     """
     impact_parts: list[str] = []
     if "to" in tool_input:
@@ -68,21 +79,27 @@ def render_prompt(tool_name: str, tool_input: dict[str, Any]) -> str:
     if not impact_parts:
         impact_parts.append("(僅 agent 內部,本次行動有外部寫入)")
 
-    draft = (
+    raw_draft = (
         tool_input.get("body")
         or tool_input.get("text")
         or tool_input.get("content")
         or tool_input.get("value")
-        or "(無草稿內容)"
     )
+    draft = raw_draft if isinstance(raw_draft, str) and raw_draft else "(無草稿內容)"
     if isinstance(draft, str) and len(draft) > 600:
         draft = draft[:600] + "… [truncated]"
 
-    return CONFIRM_PROMPT.format(
+    prompt = CONFIRM_PROMPT.format(
         tool_name=tool_name,
         impact=", ".join(impact_parts),
         draft=draft,
     )
+
+    if user_corpus and isinstance(raw_draft, str) and raw_draft:
+        vs = voice_score(raw_draft, user_corpus)
+        prompt = f"{prompt}\n\n🎙 voice match: {vs.overall_pct}% (cap 80%)"
+
+    return prompt
 
 
 class ConfirmRegistry:
@@ -137,6 +154,7 @@ async def await_decision(
     *,
     timeout_seconds: float = DEFAULT_CONFIRM_TIMEOUT,
     on_submit: OnSubmit | None = None,
+    user_corpus: str = "",
 ) -> tuple[str, bool]:
     """Submit a pending confirm and await the user's decision.
 
@@ -147,7 +165,7 @@ async def await_decision(
     """
     confirm_id, future = registry.submit(tool_name, tool_input)
     if on_submit is not None:
-        await on_submit(confirm_id, render_prompt(tool_name, tool_input))
+        await on_submit(confirm_id, render_prompt(tool_name, tool_input, user_corpus=user_corpus))
     try:
         approved = await asyncio.wait_for(future, timeout=timeout_seconds)
         return confirm_id, approved

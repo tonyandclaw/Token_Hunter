@@ -61,10 +61,12 @@ is the index. Reviewer can audit; operator can record without bluffing.
 | Category match L3 ↔ tool args | `src/replay.py:match_l3_for_event` | 1 case | (this branch) |
 | Counterfactual phrasing by Tier | `src/replay.py:_counterfactual` | 1 case | (this branch) |
 | `ReplayReport.render()` for Telegram | `src/replay.py:ReplayReport` | `test_report_render_contains_decision_block` | (this branch) |
+| Telegram `/why [index]` command | `src/main.py:on_why` | `tests/test_replay.py:test_latest_events_*` (3 cases) | W6 |
+| `latest_events()` audit-log accessor | `src/replay.py:latest_events` | tested | W6 |
 
-> **[Why this?] Telegram inline-button UX** is the only piece still aspirational —
-> `replay.build_report(event_index)` returns a fully-rendered text block; wiring a
-> button to call it is mechanical and lands in a follow-up.
+> **Memory Replay is fully wired into Telegram as of W6.** `/why` with no
+> argument replays the most recent audit event; `/why N` jumps to an explicit
+> index (negative offsets count from the end).
 
 ### Indirect prompt injection (Slide 8 — Forensic Security)
 
@@ -84,6 +86,7 @@ is the index. Reviewer can audit; operator can record without bluffing.
 | SPF / DKIM header parser (when raw headers supplied) | `src/forensic.py:analyze_auth_headers` | 3 cases | (this branch) |
 | Top-level `analyze(domain, body, headers)` → ForensicReport with severity (info/warning/block) | `src/forensic.py:analyze` | 4 cases | (this branch) |
 | `ForensicReport.render()` for Telegram | `src/forensic.py:ForensicReport` | 2 cases | (this branch) |
+| Auto-run forensic on Gmail `read` (in-tool advisory) | `src/tools/gmail_mcp.py:_forensic_block_for` | `tests/test_gmail_mcp.py:test_read_*_forensic_*` (2 cases) | W6 |
 
 > **DNS-based SPF/DKIM verification** still needs a live IMAP fetch with raw
 > headers; the analyzer surfaces "unverified" when headers aren't supplied
@@ -99,6 +102,8 @@ is the index. Reviewer can audit; operator can record without bluffing.
 | Structure similarity (sentences-per-message profile) | `src/voice_scorer.py:score` | 1 case | (this branch) |
 | 80% hard ceiling (uncanny-valley guard) | `src/voice_scorer.py:MAX_VOICE_PCT = 80` | `test_identical_text_caps_at_80` + `test_overall_never_exceeds_max` | (this branch) |
 | Total `score()` returning VoiceScore | `src/voice_scorer.py:score` | 10 cases incl mixed-language, empty-input, low-score, explain() | (this branch) |
+| Voice match in Tier-2 confirm card | `src/tier2_confirm.py:render_prompt(user_corpus=…)` | `tests/test_tier2_confirm.py:test_render_prompt_*_voice_match` (3 cases) | W6 |
+| Corpus reader from L4 session logs | `src/session_log.py:read_user_corpus` | `tests/test_session_log.py:test_read_user_corpus_*` (3 cases) | W6 |
 
 ### Absence Mode (Slide 9)
 
@@ -164,6 +169,7 @@ is the index. Reviewer can audit; operator can record without bluffing.
 | W5 | Replay engine | ✅ | `src/replay.py` (this branch) |
 | W5 | Trust Curve auto-promotion | 🔜 not started | needs N-confirm pattern detection |
 | W5 | Absence mode | 🔜 not started | — |
+| W6 | Wire moat into runtime (replay /why, forensic auto-run, voice in confirm) | ✅ | `src/main.py`, `src/tools/gmail_mcp.py`, `src/tier2_confirm.py` (W6 branch) |
 | W6 | Final demo video | 🔜 — | — |
 | W7 | Interview prep | 🔜 — | — |
 
@@ -184,12 +190,17 @@ What's still NOT in code:
    proposes "after N confirms, auto-with-undo?" — not yet implemented. Currently
    every Tier-2 call still confirms every time. The 5-stage ladder is product
    design; the W5 build is the Tier-1/2/3 three-stage gate.
-2. **Replay [Why this?] Telegram inline-button** — `replay.build_report` returns a
-   rendered text block ready to post; wiring a button on each Telegram reply to
-   call it is mechanical and lands in a follow-up.
-3. **DNS-based SPF/DKIM verification** — `forensic.analyze_auth_headers` parses
+2. **DNS-based SPF/DKIM verification** — `forensic.analyze_auth_headers` parses
    Authentication-Results headers but doesn't live-query DNS. Real-mailbox demo
    uses the parsed header path; "unverified" appears when headers aren't supplied.
+3. **Absence Mode (Slide 9)** — agent runs unattended inside trust-elevated
+   boundaries. Roadmap places this in W5 buffer; recording fallback is to skip
+   Scene 5 or show audit-log replay as a static stand-in.
+
+Replay's `[Why this?]` UX landed in W6 as the Telegram `/why [index]` command —
+no inline button, but a command-line form that surfaces the same fully-rendered
+report (decision, triggered L3, similar cases, voice match, forensic,
+counterfactual).
 
 Three honest paragraphs in the deck (one per gap) are better than fudging — reviewers
 will spot the absence in any live Q&A.

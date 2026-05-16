@@ -31,6 +31,32 @@ def test_append_entry_format(tmp_path: Path):
     assert line == "- `08:23:11Z` looked at Gmail"
 
 
+def test_read_user_corpus_extracts_user_lines_only(tmp_path: Path):
+    now = datetime(2026, 5, 14, 12, 0, tzinfo=UTC)
+    session_log.append_entry("user[42]: 週五交付沒問題", sessions_dir=tmp_path, now=now)
+    session_log.append_entry("agent[42]: 收到", sessions_dir=tmp_path, now=now)
+    session_log.append_entry("user[42]: 明天再確認規格", sessions_dir=tmp_path, now=now)
+    corpus = session_log.read_user_corpus(tmp_path, now=now)
+    assert "週五交付沒問題" in corpus
+    assert "明天再確認規格" in corpus
+    # Agent line is filtered out
+    assert "收到" not in corpus
+
+
+def test_read_user_corpus_respects_days_window(tmp_path: Path):
+    today = datetime(2026, 5, 14, 12, 0, tzinfo=UTC)
+    long_ago = today - timedelta(days=30)
+    session_log.append_entry("user[1]: stale message", sessions_dir=tmp_path, now=long_ago)
+    session_log.append_entry("user[1]: fresh message", sessions_dir=tmp_path, now=today)
+    corpus = session_log.read_user_corpus(tmp_path, days=7, now=today)
+    assert "fresh message" in corpus
+    assert "stale message" not in corpus
+
+
+def test_read_user_corpus_missing_dir_returns_empty(tmp_path: Path):
+    assert session_log.read_user_corpus(tmp_path / "does-not-exist") == ""
+
+
 def test_prune_old_drops_files_older_than_retention(tmp_path: Path):
     today = datetime(2026, 5, 13, tzinfo=UTC)
     # 35 days ago — should be pruned

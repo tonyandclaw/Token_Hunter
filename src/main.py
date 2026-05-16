@@ -29,12 +29,13 @@ from telegram.ext import (
     Application,
     ApplicationBuilder,
     CallbackQueryHandler,
+    CommandHandler,
     ContextTypes,
     MessageHandler,
     filters,
 )
 
-from src import kill_switch, session_log
+from src import kill_switch, replay, session_log
 from src.agent import reply
 from src.cost_meter import Alert, BudgetState, Severity
 from src.tier2_confirm import ConfirmRegistry
@@ -161,12 +162,17 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
     session_log.append_entry(f"user[{user.id}]: {text[:120]}")
     log.info("turn from %s: %s", user.id, text[:80])
+    # Read the user's recent writing as the voice-match corpus. This is read
+    # AFTER appending the current turn so the new message is part of the
+    # baseline (cheap, and means corpus grows organically across days).
+    user_corpus = session_log.read_user_corpus()
     try:
         answer = await reply(
             text,
             session_id=_session_for(user.id),
             confirm_registry=_REGISTRY,
             notify=_make_notify(ctx.application, user.id),
+            user_corpus=user_corpus,
         )
     except Exception:
         log.exception("agent call failed")
@@ -184,9 +190,56 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             await msg.reply_text(_format_alert(alert))
 
 
+def _parse_why_index(args: list[str]) -> int:
+    """`/why` → -1 (last event). `/why N` → int(N). Falls back to -1 on bad input."""
+    if not args:
+        return -1
+    try:
+        return int(args[0])
+    except ValueError:
+        return -1
+
+
+async def on_why(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/why [index]` — render a Memory Replay report for the chosen audit event.
+
+    No args: the most recent event in today's audit log. Numeric arg: a 0-based
+    forward index (or negative offset from the end). The report includes the
+    triggered L3 entries, similar prior cases, voice-match score, forensic
+    findings, and counterfactual — all per replay.build_report.
+    """
+    msg = update.effective_message
+    user = update.effective_user
+    if not msg or not user or user.id not in ALLOWED:
+        return
+
+    raw_args = ctx.args or []
+    raw_index = _parse_why_index(raw_args)
+
+    # Resolve negative offsets against the most recent audit log so we can
+    # surface a clear "no events" message instead of None.
+    events = replay.latest_events()
+    if not events:
+        await msg.reply_text("📜 還沒有任何 audit event 可以 replay。")
+        return
+    if raw_index < 0:
+        raw_index = len(events) + raw_index
+    if raw_index < 0 or raw_index >= len(events):
+        await msg.reply_text(f"📜 index 超出範圍(共 {len(events)} 個 event)。")
+        return
+
+    corpus = session_log.read_user_corpus()
+    report = replay.build_report(raw_index, user_corpus=corpus)
+    if report is None:
+        await msg.reply_text("📜 該 event 找不到。")
+        return
+    await msg.reply_text(report.render())
+
+
 def build_app():
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     app = ApplicationBuilder().token(token).build()
+    app.add_handler(CommandHandler("why", on_why))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     app.add_handler(CallbackQueryHandler(on_confirm_button, pattern=f"^{CONFIRM_CALLBACK_PREFIX}:"))
     return app

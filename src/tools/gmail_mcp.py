@@ -17,12 +17,15 @@ client method calls and shape the result for Claude.
 from __future__ import annotations
 
 import os
+import re
 import smtplib
 from dataclasses import dataclass
 from email.message import EmailMessage
 from typing import Any, Protocol
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
+
+from src.forensic import analyze as analyze_forensic
 
 
 @dataclass(frozen=True)
@@ -157,8 +160,34 @@ def _format_summaries(items: list[EmailSummary]) -> str:
     return "\n".join(lines)
 
 
+_SENDER_ADDR_RE = re.compile(r"<([^>]+)>")
+
+
+def _sender_domain(sender: str) -> str:
+    """Extract bare domain from a From header like '"Alice" <alice@a.com>'."""
+    m = _SENDER_ADDR_RE.search(sender)
+    addr = m.group(1) if m else sender
+    return addr.split("@")[-1].strip().lower() if "@" in addr else addr.strip().lower()
+
+
+def _forensic_block_for(m: EmailFull) -> str | None:
+    """Run the forensic analyzer; return a warning block only if severity != info.
+
+    On a benign message we return None so the agent's context isn't polluted
+    with empty forensic blocks. Tier-3 auto-block lives in permissions.py;
+    this is the in-tool advisory layer the agent sees alongside the body.
+    """
+    domain = _sender_domain(m.sender)
+    if not domain:
+        return None
+    report = analyze_forensic(domain, m.body)
+    if report.severity == "info":
+        return None
+    return report.render()
+
+
 def _format_full(m: EmailFull) -> str:
-    return (
+    body = (
         f"uid: {m.uid}\n"
         f"From: {m.sender}\n"
         f"To: {', '.join(m.to) if m.to else '(none)'}\n"
@@ -167,6 +196,10 @@ def _format_full(m: EmailFull) -> str:
         f"Attachments: {', '.join(m.attachments) if m.attachments else '(none)'}\n\n"
         f"{m.body}"
     )
+    forensic = _forensic_block_for(m)
+    if forensic is not None:
+        body = f"{body}\n\n---\n{forensic}"
+    return body
 
 
 def build_tools(client_factory):
