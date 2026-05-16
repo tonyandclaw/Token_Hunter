@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,9 @@ from src.tier2_confirm import DEFAULT_CONFIRM_TIMEOUT, ConfirmRegistry, OnSubmit
 from src.tools.bluesky_mcp import build_server as build_bluesky_server
 from src.tools.gmail_mcp import build_server as build_gmail_server
 from src.tools.memory_mcp import build_server as build_memory_server
+from src.trust_curve import TrustCurve, render_proposal
+
+NotifyText = Callable[[str], Awaitable[None]]
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SYSTEM_PROMPT_PATH = REPO_ROOT / "docs" / "00-agent-identity.md"
@@ -130,8 +134,16 @@ def make_can_use_tool(
     notify: OnSubmit,
     *,
     timeout_seconds: float = DEFAULT_CONFIRM_TIMEOUT,
+    trust_curve: TrustCurve | None = None,
+    notify_proposal: NotifyText | None = None,
 ):
-    """Build the SDK's can_use_tool callback that drives the Tier-2 confirm loop."""
+    """Build the SDK's can_use_tool callback that drives the Tier-2 confirm loop.
+
+    When `trust_curve` is supplied, every confirmed/denied outcome updates the
+    streak counter. If the streak crosses the proposal threshold and
+    `notify_proposal` is wired, a one-time escalation proposal is dispatched
+    via that channel (separate from the confirm card so it doesn't block).
+    """
 
     async def can_use_tool(
         tool_name: str,
@@ -145,6 +157,14 @@ def make_can_use_tool(
             on_submit=notify,
             timeout_seconds=timeout_seconds,
         )
+
+        if trust_curve is not None:
+            state = trust_curve.record(tool_name, tool_input, approved=approved)
+            if approved and trust_curve.should_propose(state) and notify_proposal is not None:
+                proposal = render_proposal(state)
+                await notify_proposal(proposal.message)
+                trust_curve.mark_proposed(tool_name, tool_input)
+
         if approved:
             return PermissionResultAllow()
         return PermissionResultDeny(
@@ -163,13 +183,20 @@ def build_options(
     enable_gmail: bool = True,
     enable_memory: bool = True,
     enable_bluesky: bool = True,
+    trust_curve: TrustCurve | None = None,
+    notify_proposal: NotifyText | None = None,
 ) -> ClaudeAgentOptions:
     sid = session_id or uuid.uuid4().hex
     audit = AuditLogger()
 
     can_use_tool = None
     if confirm_registry is not None and notify is not None:
-        can_use_tool = make_can_use_tool(confirm_registry, notify)
+        can_use_tool = make_can_use_tool(
+            confirm_registry,
+            notify,
+            trust_curve=trust_curve,
+            notify_proposal=notify_proposal,
+        )
 
     mcp_servers: dict[str, Any] = {}
     if enable_gmail:
@@ -200,12 +227,16 @@ async def reply(
     session_id: str | None = None,
     confirm_registry: ConfirmRegistry | None = None,
     notify: OnSubmit | None = None,
+    trust_curve: TrustCurve | None = None,
+    notify_proposal: NotifyText | None = None,
 ) -> str:
     """Send one user turn, collect text response. session_id is propagated to hooks."""
     options = build_options(
         session_id,
         confirm_registry=confirm_registry,
         notify=notify,
+        trust_curve=trust_curve,
+        notify_proposal=notify_proposal,
     )
     chunks: list[str] = []
     async for event in query(prompt=user_message, options=options):

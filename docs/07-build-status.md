@@ -35,9 +35,16 @@ is the index. Reviewer can audit; operator can record without bluffing.
 | `can_use_tool` callback bridges SDK→Telegram | `src/agent.py:make_can_use_tool` | `tests/test_agent_hooks.py:test_can_use_tool_*` (3 cases) | #6 |
 | Telegram inline buttons (✅/❌, callback_data `t2:<id>:yes\|no`) | `src/main.py:_confirm_keyboard`, `on_confirm_button` | manual (live Telegram) | #6 |
 | Stale tap after timeout marked "(已過期)" | `src/main.py:on_confirm_button` | `tests/test_tier2_confirm.py:test_resolve_after_timeout_is_safe` | #6 |
+| Trust Curve pattern fingerprint + streak counter | `src/trust_curve.py:TrustCurve` | `tests/test_trust_curve.py` (17 cases) | W5b |
+| Trust Curve `trust/curves.json` persistence | `src/trust_curve.py:load_or_empty` | tested (roundtrip + corrupt fallback) | W5b |
+| Trust Curve escalation proposal at N=5 streak | `src/trust_curve.py:render_proposal` + `make_can_use_tool(trust_curve=…)` | `test_can_use_tool_surfaces_escalation_proposal_after_threshold` | W5b |
+| Denial resets streak + clears proposed flag | `TrustCurve.record(approved=False)` | `test_can_use_tool_denial_resets_streak_*` | W5b |
 
-> **Trust Curve auto-promotion (Slide 5)** — pattern detection / N-confirm escalation is
-> NOT yet implemented. Currently every Tier-2 call confirms every time. PR #11+.
+> **Trust Curve auto-execute + 60s undo** — the *proposal* mechanic (the
+> agent itself suggesting "auto-with-undo?" after a streak) is built. The
+> *acceptance* path (user accepting the proposal flips the pattern to
+> auto-execute with a 60s undo window) is a follow-up; on accept today the
+> next call still confirms.
 
 ### Memory L1–L4 (Slide 6 — Memory Replay)
 
@@ -162,7 +169,8 @@ is the index. Reviewer can audit; operator can record without bluffing.
 | W5 | Forensic analyzer + injection demo | ✅ | `src/forensic.py` (this branch) |
 | W5 | Voice scorer | ✅ | `src/voice_scorer.py` (this branch) |
 | W5 | Replay engine | ✅ | `src/replay.py` (this branch) |
-| W5 | Trust Curve auto-promotion | 🔜 not started | needs N-confirm pattern detection |
+| W5 | Trust Curve auto-promotion (proposal mechanic) | ✅ | `src/trust_curve.py` (W5b branch) |
+| W5 | Trust Curve accept → auto-execute + 60s undo | 🔜 not started | proposal lands, acceptance flow is the follow-up |
 | W5 | Absence mode | 🔜 not started | — |
 | W6 | Final demo video | 🔜 — | — |
 | W7 | Interview prep | 🔜 — | — |
@@ -180,10 +188,11 @@ this branch (`claude/w5-voice-scorer`):
 
 What's still NOT in code:
 
-1. **Trust Curve auto-promotion (Slide 5)** — pattern detection so the agent itself
-   proposes "after N confirms, auto-with-undo?" — not yet implemented. Currently
-   every Tier-2 call still confirms every time. The 5-stage ladder is product
-   design; the W5 build is the Tier-1/2/3 three-stage gate.
+1. **Trust Curve accept → auto-execute + 60s undo** — the *proposal* fires after
+   a 5-confirm streak (`src/trust_curve.py`, surfaces "要不要升級為自動執行 + 60 秒可撤?").
+   The user *accepting* the proposal (flipping the pattern to auto-execute with
+   a 60s undo window) is still a follow-up — today acceptance still routes
+   through normal confirm.
 2. **Replay [Why this?] Telegram inline-button** — `replay.build_report` returns a
    rendered text block ready to post; wiring a button on each Telegram reply to
    call it is mechanical and lands in a follow-up.
