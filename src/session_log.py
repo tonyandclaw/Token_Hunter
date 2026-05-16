@@ -11,6 +11,7 @@ Writes to this directory are explicitly Tier 1 (auto) per docs/00.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -49,6 +50,41 @@ def append_entry(
     with path.open("a", encoding="utf-8") as fh:
         fh.write(f"- `{ts}` {text}\n")
     return path
+
+
+_USER_ENTRY_RE = re.compile(r"^- `\d{2}:\d{2}:\d{2}Z`\s+user\[\d+\]:\s+(.*)$")
+
+
+def read_user_corpus(
+    sessions_dir: Path | None = None,
+    *,
+    days: int = 7,
+    now: datetime | None = None,
+) -> str:
+    """Concatenate the user's own messages from the last `days` of session logs.
+
+    Used as the voice-match corpus in Tier-2 confirm cards. Lines from the
+    agent and tool calls are filtered out — we only fingerprint how the user
+    writes, not how the agent has been writing on their behalf.
+    """
+    base = sessions_dir or SESSIONS_DIR
+    if not base.exists():
+        return ""
+    today = (now or datetime.now(UTC)).date()
+    cutoff = today - timedelta(days=days)
+    pieces: list[str] = []
+    for path in sorted(base.glob("*.md")):
+        try:
+            file_date = date.fromisoformat(path.stem)
+        except ValueError:
+            continue
+        if file_date < cutoff:
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            m = _USER_ENTRY_RE.match(line)
+            if m:
+                pieces.append(m.group(1))
+    return "\n\n".join(pieces)
 
 
 def prune_old(

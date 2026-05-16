@@ -130,8 +130,14 @@ def make_can_use_tool(
     notify: OnSubmit,
     *,
     timeout_seconds: float = DEFAULT_CONFIRM_TIMEOUT,
+    user_corpus: str = "",
 ):
-    """Build the SDK's can_use_tool callback that drives the Tier-2 confirm loop."""
+    """Build the SDK's can_use_tool callback that drives the Tier-2 confirm loop.
+
+    `user_corpus` is the user's prior writing; when present, the Tier-2 confirm
+    card includes a voice-match score for the draft body so the user can spot
+    drafts that don't sound like them.
+    """
 
     async def can_use_tool(
         tool_name: str,
@@ -144,6 +150,7 @@ def make_can_use_tool(
             tool_input,
             on_submit=notify,
             timeout_seconds=timeout_seconds,
+            user_corpus=user_corpus,
         )
         if approved:
             return PermissionResultAllow()
@@ -163,13 +170,14 @@ def build_options(
     enable_gmail: bool = True,
     enable_memory: bool = True,
     enable_bluesky: bool = True,
+    user_corpus: str = "",
 ) -> ClaudeAgentOptions:
     sid = session_id or uuid.uuid4().hex
     audit = AuditLogger()
 
     can_use_tool = None
     if confirm_registry is not None and notify is not None:
-        can_use_tool = make_can_use_tool(confirm_registry, notify)
+        can_use_tool = make_can_use_tool(confirm_registry, notify, user_corpus=user_corpus)
 
     mcp_servers: dict[str, Any] = {}
     if enable_gmail:
@@ -200,12 +208,14 @@ async def reply(
     session_id: str | None = None,
     confirm_registry: ConfirmRegistry | None = None,
     notify: OnSubmit | None = None,
+    user_corpus: str = "",
 ) -> str:
     """Send one user turn, collect text response. session_id is propagated to hooks."""
     options = build_options(
         session_id,
         confirm_registry=confirm_registry,
         notify=notify,
+        user_corpus=user_corpus,
     )
     chunks: list[str] = []
     async for event in query(prompt=user_message, options=options):

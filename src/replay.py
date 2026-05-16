@@ -130,6 +130,28 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return out
 
 
+def latest_events(
+    logs_dir: Path | None = None,
+    *,
+    log_date: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return events from the requested log file, or from the most recent one.
+
+    Public companion to `build_report`'s internal file-selection logic, used by
+    the Telegram `/why` command to bounds-check the index argument before
+    calling `build_report`.
+    """
+    logs_root = logs_dir or LOGS_DIR
+    if log_date is not None:
+        return _read_jsonl(logs_root / f"{log_date}.jsonl")
+    if not logs_root.exists():
+        return []
+    candidates = sorted(logs_root.glob("*.jsonl"))
+    if not candidates:
+        return []
+    return _read_jsonl(candidates[-1])
+
+
 def _parse_l3_field(body: str, label: str) -> str:
     """Pull '**Label**: value' out of an L3 block body."""
     m = re.search(rf"\*\*{re.escape(label)}\*\*[::]\s*([^\n]+)", body)

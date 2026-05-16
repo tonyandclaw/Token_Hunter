@@ -6,6 +6,7 @@ from pathlib import Path
 from src.replay import (
     build_report,
     find_similar_cases,
+    latest_events,
     match_l3_for_event,
     parse_learnings,
 )
@@ -205,3 +206,22 @@ def test_report_render_contains_decision_block(tmp_path: Path):
 
 def test_build_report_no_logs_returns_none(tmp_path: Path):
     assert build_report(0, logs_dir=tmp_path) is None
+
+
+def test_latest_events_returns_empty_when_no_logs(tmp_path: Path):
+    assert latest_events(tmp_path) == []
+
+
+def test_latest_events_picks_most_recent_file(tmp_path: Path):
+    _write_log(tmp_path, "2026-05-10", [_ev("a", turn=1)])
+    _write_log(tmp_path, "2026-05-14", [_ev("b", turn=2), _ev("c", turn=3)])
+    events = latest_events(tmp_path)
+    assert len(events) == 2
+    assert [e["tool"] for e in events] == ["b", "c"]
+
+
+def test_latest_events_explicit_log_date(tmp_path: Path):
+    _write_log(tmp_path, "2026-05-10", [_ev("a", turn=1)])
+    _write_log(tmp_path, "2026-05-14", [_ev("b", turn=2)])
+    events = latest_events(tmp_path, log_date="2026-05-10")
+    assert [e["tool"] for e in events] == ["a"]
