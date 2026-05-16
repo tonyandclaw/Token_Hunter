@@ -38,6 +38,7 @@ from src import kill_switch, session_log
 from src.agent import reply
 from src.cost_meter import Alert, BudgetState, Severity
 from src.tier2_confirm import ConfirmRegistry
+from src.trust_curve import TrustCurve
 
 load_dotenv()
 
@@ -61,6 +62,9 @@ _SESSIONS: dict[int, str] = {}
 _REGISTRY = ConfirmRegistry()
 # CostMeter state, lazily set in main(). None means "no budget enforcement".
 _BUDGET: BudgetState | None = None
+# Trust Curve — N-confirm streak detector. Lazily loaded in main() so tests
+# that import this module don't touch the on-disk curves.json.
+_TRUST: TrustCurve | None = None
 
 
 def _alert_emoji(sev: Severity) -> str:
@@ -110,6 +114,19 @@ def _make_notify(app: Application, user_id: int):
         )
 
     return notify
+
+
+def _make_notify_text(app: Application, user_id: int):
+    """Factory: returns a plain-text notify coroutine (no inline buttons).
+
+    Used for Trust Curve escalation proposals, which are informational and
+    don't pause the agent — the user can reply on their own schedule.
+    """
+
+    async def notify_text(text: str) -> None:
+        await app.bot.send_message(chat_id=user_id, text=text)
+
+    return notify_text
 
 
 async def on_confirm_button(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -167,6 +184,8 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             session_id=_session_for(user.id),
             confirm_registry=_REGISTRY,
             notify=_make_notify(ctx.application, user.id),
+            trust_curve=_TRUST,
+            notify_proposal=_make_notify_text(ctx.application, user.id),
         )
     except Exception:
         log.exception("agent call failed")
@@ -208,6 +227,12 @@ def main() -> None:
     if budget > 0:
         _BUDGET = BudgetState(budget)
         log.info("cost budget enforcement enabled: %.2f USD", budget)
+
+    # Trust Curve — load (or initialize) the streak counter file. Always on
+    # in production; tests don't import main() so this only runs at startup.
+    global _TRUST
+    _TRUST = TrustCurve.load_or_empty()
+    log.info("trust curve loaded; propose threshold = %d", _TRUST.threshold)
 
     app = build_app()
     webhook_url = os.environ["TELEGRAM_WEBHOOK_URL"]

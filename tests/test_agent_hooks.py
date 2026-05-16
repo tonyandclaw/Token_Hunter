@@ -20,6 +20,7 @@ from src.agent import (
 )
 from src.audit import AuditLogger
 from src.tier2_confirm import ConfirmRegistry
+from src.trust_curve import TrustCurve
 
 
 def _pre_input(tool_name: str, tool_input: dict | None = None) -> dict:
@@ -161,3 +162,75 @@ async def test_can_use_tool_deny_on_timeout():
     assert isinstance(result, PermissionResultDeny)
     assert notified.is_set()
     assert registry.pending_count() == 0
+
+
+async def test_can_use_tool_records_trust_curve_streak():
+    """Each approved Tier-2 call bumps the trust curve streak counter."""
+    registry = ConfirmRegistry()
+    trust = TrustCurve(path=None, propose_threshold=10)
+
+    async def notify(cid: str, _prompt: str) -> None:
+        registry.resolve(cid, approved=True)
+
+    can_use = make_can_use_tool(registry, notify, trust_curve=trust)
+    for _ in range(3):
+        await can_use(
+            "mcp__gmail__send",
+            {"to": "alice@a.com"},
+            None,  # type: ignore[arg-type]
+        )
+    assert trust.state_for("mcp__gmail__send", {"to": "alice@a.com"}).streak == 3
+
+
+async def test_can_use_tool_surfaces_escalation_proposal_after_threshold():
+    registry = ConfirmRegistry()
+    trust = TrustCurve(path=None, propose_threshold=2)
+    proposals: list[str] = []
+
+    async def notify(cid: str, _prompt: str) -> None:
+        registry.resolve(cid, approved=True)
+
+    async def notify_proposal(text: str) -> None:
+        proposals.append(text)
+
+    can_use = make_can_use_tool(
+        registry,
+        notify,
+        trust_curve=trust,
+        notify_proposal=notify_proposal,
+    )
+    # 1st confirm — no proposal yet
+    await can_use("mcp__gmail__send", {"to": "alice@a.com"}, None)  # type: ignore[arg-type]
+    assert proposals == []
+    # 2nd confirm — threshold hit, proposal fires
+    await can_use("mcp__gmail__send", {"to": "alice@a.com"}, None)  # type: ignore[arg-type]
+    assert len(proposals) == 1
+    assert "alice@a.com" in proposals[0]
+    assert "60 秒" in proposals[0]
+    # 3rd confirm — silenced (already proposed)
+    await can_use("mcp__gmail__send", {"to": "alice@a.com"}, None)  # type: ignore[arg-type]
+    assert len(proposals) == 1
+
+
+async def test_can_use_tool_denial_resets_streak_and_clears_proposed():
+    registry = ConfirmRegistry()
+    trust = TrustCurve(path=None, propose_threshold=2)
+    proposals: list[str] = []
+    decisions = iter([True, True, False, True, True])
+
+    async def notify(cid: str, _prompt: str) -> None:
+        registry.resolve(cid, approved=next(decisions))
+
+    async def notify_proposal(text: str) -> None:
+        proposals.append(text)
+
+    can_use = make_can_use_tool(
+        registry,
+        notify,
+        trust_curve=trust,
+        notify_proposal=notify_proposal,
+    )
+    for _ in range(5):
+        await can_use("mcp__gmail__send", {"to": "alice@a.com"}, None)  # type: ignore[arg-type]
+    # Two proposals: one before the denial, one after the new 2-streak
+    assert len(proposals) == 2
